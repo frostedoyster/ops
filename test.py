@@ -4,11 +4,12 @@ from ops import ref_ops, opt_ops
 
 def test(dtype, device):
     print(f"Testing dtype {dtype} and device {device}")
-    a = torch.rand((100, 20), dtype=dtype, device=device)
-    b = torch.rand((100, 5), dtype=dtype, device=device)
+    a = torch.rand((100, 5), dtype=dtype, device=device)
+    b = torch.rand((100, 30), dtype=dtype, device=device)
     indices = torch.sort(torch.randint(10, (100,), device=device))[0]
     out_ref = ref_ops(a, b, indices, 10)
     out_opt = opt_ops(a, b, indices, 10)
+    print(out_opt.shape)
     assert torch.allclose(out_ref, out_opt)
     print("Assertion passed successfully!")
 

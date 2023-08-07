@@ -6,8 +6,8 @@ import time
 def benchmark(dtype, device):
     
     print(f"Benchmarking dtype {dtype} and device {device}")
-    a = torch.rand((100000, 20), dtype=dtype, device=device)
-    b = torch.rand((100000, 5), dtype=dtype, device=device)
+    a = torch.rand((100000, 5), dtype=dtype, device=device)
+    b = torch.rand((100000, 30), dtype=dtype, device=device)
     indices = torch.sort(torch.randint(1000, (100000,), device=device))[0]
 
     # Warm-up:
