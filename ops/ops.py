@@ -41,13 +41,12 @@ class OptOps(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
 
-        """tensor_a, tensor_b, scatter_indices = ctx.saved_tensors
+        tensor_a, tensor_b, scatter_indices = ctx.saved_tensors
         out_dim = grad_output.shape[0]        
         
         if tensor_a.is_cuda:
             return ops_cuda.backward(grad_output, tensor_a, tensor_b, scatter_indices, out_dim)
         else:
-            return ops_cc.backward(grad_output, tensor_a, tensor_b, scatter_indices, out_dim)"""
-        pass
+            return ops_cc.backward(grad_output, tensor_a, tensor_b, scatter_indices, out_dim)
 
 opt_ops = OptOps.apply  # simply rename the function to make it easier to call
