@@ -29,6 +29,7 @@ std::vector<long> find_first_occurrences(torch::Tensor scatter_indices, long out
 template<typename scalar_t>
 torch::Tensor forward_t(torch::Tensor tensor_a, torch::Tensor tensor_b, torch::Tensor scatter_indices, long out_dim) {
 
+    long size_scatter = scatter_indices.size(0);
     long size_a = tensor_a.size(1);
     long size_b = tensor_b.size(1);
     torch::Tensor result = torch::zeros(
@@ -53,6 +54,7 @@ torch::Tensor forward_t(torch::Tensor tensor_a, torch::Tensor tensor_b, torch::T
                 }
             }
             idx_in++;
+            if (idx_in == size_scatter) break;
         }
     }
 
@@ -76,6 +78,7 @@ std::vector<torch::Tensor> backward_t(torch::Tensor grad_output, torch::Tensor t
 
     long size_a = tensor_a.size(1);
     long size_b = tensor_b.size(1);
+    long size_scatter = scatter_indices.size(0);
     torch::Tensor grad_a = torch::Tensor();
     torch::Tensor grad_b = torch::Tensor();
 
@@ -100,6 +103,7 @@ std::vector<torch::Tensor> backward_t(torch::Tensor grad_output, torch::Tensor t
                     }
                 }
                 idx_in++;
+                if (idx_in == size_scatter) break;
             }
         }
     }
@@ -119,11 +123,12 @@ std::vector<torch::Tensor> backward_t(torch::Tensor grad_output, torch::Tensor t
                     }
                 }
                 idx_in++;
+                if (idx_in == size_scatter) break;
             }
         }
     }
 
-    return {};
+    return {grad_a, grad_b, torch::Tensor(), torch::Tensor()};
 }
 
 std::vector<torch::Tensor> backward(torch::Tensor grad_output, torch::Tensor tensor_a, torch::Tensor tensor_b, torch::Tensor scatter_indices, long out_dim) {
@@ -140,5 +145,5 @@ std::vector<torch::Tensor> backward(torch::Tensor grad_output, torch::Tensor ten
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("forward", &forward, "ops forward cpu");
-  // m.def("backward", &backward, "ops backward cpu");
+  m.def("backward", &backward, "ops backward cpu");
 }

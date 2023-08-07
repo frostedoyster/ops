@@ -4,14 +4,25 @@ from ops import ref_ops, opt_ops
 
 def test(dtype, device):
     print(f"Testing dtype {dtype} and device {device}")
-    a = torch.rand((100, 5), dtype=dtype, device=device)
-    b = torch.rand((100, 30), dtype=dtype, device=device)
+
+    a_ref = torch.rand((100, 20), dtype=dtype, device=device, requires_grad=True)
+    b_ref = torch.rand((100, 5), dtype=dtype, device=device, requires_grad=True)
+    a_opt = a_ref.clone().detach().requires_grad_(True)
+    b_opt = b_ref.clone().detach().requires_grad_(True)
     indices = torch.sort(torch.randint(10, (100,), device=device))[0]
-    out_ref = ref_ops(a, b, indices, 10)
-    out_opt = opt_ops(a, b, indices, 10)
-    print(out_opt.shape)
+    out_ref = ref_ops(a_ref, b_ref, indices, 10)
+    out_opt = opt_ops(a_opt, b_opt, indices, 10)
     assert torch.allclose(out_ref, out_opt)
-    print("Assertion passed successfully!")
+
+    loss_ref = torch.sum(out_ref)
+    loss_ref.backward()
+    loss_opt = torch.sum(out_opt)
+    loss_opt.backward()
+    print(a_ref.grad, a_opt.grad)
+    assert torch.allclose(a_ref.grad, a_opt.grad)
+    assert torch.allclose(b_ref.grad, b_opt.grad)
+
+    print("Assertions passed successfully!")
 
 
 if __name__ == "__main__":

@@ -30,6 +30,10 @@ class OptOps(torch.autograd.Function):
         if tensor_a.device != tensor_b.device: raise ValueError("All tensors must be on the same device")
         if tensor_a.device != scatter_indices.device: raise ValueError("All tensors must be on the same device")
         if tensor_a.dtype != tensor_b.dtype: raise ValueError("The two float tensors must have the same dtype")
+
+        tensor_a = tensor_a.contiguous()
+        tensor_b = tensor_b.contiguous()
+        scatter_indices = scatter_indices.contiguous()
         
         ctx.save_for_backward(tensor_a, tensor_b, scatter_indices)
 
@@ -45,8 +49,10 @@ class OptOps(torch.autograd.Function):
         out_dim = grad_output.shape[0]        
         
         if tensor_a.is_cuda:
-            return ops_cuda.backward(grad_output, tensor_a, tensor_b, scatter_indices, out_dim)
+            grad_a, grad_b, _, _ = ops_cuda.backward(grad_output.contiguous(), tensor_a, tensor_b, scatter_indices, out_dim)
         else:
-            return ops_cc.backward(grad_output, tensor_a, tensor_b, scatter_indices, out_dim)
+            grad_a, grad_b, _, _ = ops_cc.backward(grad_output.contiguous(), tensor_a, tensor_b, scatter_indices, out_dim)
+        
+        return grad_a, grad_b, None, None
 
 opt_ops = OptOps.apply  # simply rename the function to make it easier to call
