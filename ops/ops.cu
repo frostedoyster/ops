@@ -119,7 +119,7 @@ torch::Tensor forward_gpu(torch::Tensor X,
 #define NEIGHBOUR_NEDGES_PER_BLOCK 512
 
 /*
-This function takes a sorted input sender_list, which maps each edge to a node by index, and outputs the "boundaries" when the index pattern changes
+This function takes a sorted input sender_list, which maps each edge to a node by index, and finds the positions of first occurences
 
 This is required by the CUDA code so we can send all calculations per-node to a single block.
 
