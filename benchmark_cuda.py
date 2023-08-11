@@ -35,7 +35,7 @@ def benchmark(dtype, device):
     for _ in range(100):
         output_cuda = ops_cuda.forward(X, Y, neighbour_cuda, nnodes,  32, 4, 1)
     finish = time.time()
-    print(f"The CUDA implementation 1 forward took {finish-start} seconds")
+    print(f"The CUDA implementation forward took {finish-start} seconds")
 
     start = time.time()
     for _ in range(100):
