@@ -119,7 +119,6 @@ torch::Tensor forward_gpu(torch::Tensor X,
 #define NEIGHBOUR_NEDGES_PER_BLOCK 512
 
 /*
-
 This function takes a sorted input sender_list, which maps each edge to a node by index, and outputs the "boundaries" when the index pattern changes
 
 This is required by the CUDA code so we can send all calculations per-node to a single block.
@@ -148,6 +147,8 @@ __global__ void calculate_neighbours_kernel(const torch::PackedTensorAccessor32<
             smem[i] = sender_list[idx];
         }
     }
+
+    __syncthreads();
 
     // deal with even boundaries
     for (int i = 2 * threadIdx.x; i < NEIGHBOUR_NEDGES_PER_BLOCK; i += 2 * blockDim.x)
