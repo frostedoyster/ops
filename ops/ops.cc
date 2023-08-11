@@ -3,31 +3,27 @@
 #include <omp.h>
 
 
-std::vector<long> find_first_occurrences(torch::Tensor scatter_indices, long out_dim) {
+torch::Tensor find_first_occurrences(torch::Tensor scatter_indices, long out_dim) {
     // Finds the positions of the first occurrences within scatter_indices
     
-    //long scatter_size = scatter_indices.size(0);
+    long scatter_size = scatter_indices.size(0);
     long* scatter_indices_ptr = scatter_indices.data_ptr<long>();
-    std::vector<long> first_occurrences(out_dim);
-    long counter = 0;
-    long idx = 0;
-    while (counter < out_dim) {
-        if (scatter_indices_ptr[idx] < counter) {
-            idx++;
-        } else if (scatter_indices_ptr[idx] == counter) {
-            first_occurrences[counter] = idx;
-            counter++;
-            idx++;
-        } else {
-            first_occurrences[counter] = -1;
-            counter++;
-        }
+    torch::Tensor first_occurrences = torch::empty({out_dim}, torch::dtype(torch::kLong));
+    first_occurrences.fill_(-1);
+    long* first_occurrences_ptr = first_occurrences.data_ptr<long>();
+    first_occurrences_ptr[scatter_indices_ptr[0]] = 0;
+
+    #pragma omp parallel for
+    for (long i = 0; i < scatter_size-1; i++) {
+        if (scatter_indices_ptr[i] < scatter_indices_ptr[i+1]) first_occurrences_ptr[scatter_indices_ptr[i+1]] = i+1;
     }
+
     return first_occurrences;
 }
 
+
 template<typename scalar_t>
-torch::Tensor forward_t(torch::Tensor tensor_a, torch::Tensor tensor_b, torch::Tensor scatter_indices, long out_dim) {
+torch::Tensor forward_t(torch::Tensor tensor_a, torch::Tensor tensor_b, torch::Tensor scatter_indices, torch::Tensor first_occurrences, long out_dim) {
 
     long size_scatter = scatter_indices.size(0);
     long size_a = tensor_a.size(1);
@@ -37,15 +33,15 @@ torch::Tensor forward_t(torch::Tensor tensor_a, torch::Tensor tensor_b, torch::T
         torch::TensorOptions().device(tensor_a.device()).dtype(tensor_a.dtype())
     );
 
-    std::vector<long> first_occurrences = find_first_occurrences(scatter_indices, out_dim);
     scalar_t* result_ptr = result.data_ptr<scalar_t>();
     scalar_t* tensor_a_ptr = tensor_a.data_ptr<scalar_t>();
     scalar_t* tensor_b_ptr = tensor_b.data_ptr<scalar_t>();
     long* scatter_indices_ptr = scatter_indices.data_ptr<long>();
+    long* first_occurrences_ptr = first_occurrences.data_ptr<long>();
 
     #pragma omp parallel for
     for (long idx_out = 0; idx_out < out_dim; idx_out++) {
-        long idx_in = first_occurrences[idx_out];
+        long idx_in = first_occurrences_ptr[idx_out];
         if (idx_in < 0) continue;
         while (scatter_indices_ptr[idx_in] == idx_out) {
             for (long idx_a = 0; idx_a < size_a; idx_a++) {
@@ -61,20 +57,9 @@ torch::Tensor forward_t(torch::Tensor tensor_a, torch::Tensor tensor_b, torch::T
     return result;
 }
 
-torch::Tensor forward(torch::Tensor tensor_a, torch::Tensor tensor_b, torch::Tensor scatter_indices, long out_dim) {
-    // Dispatch type by hand
-    if (tensor_a.dtype() == c10::kDouble) {
-        return forward_t<double>(tensor_a, tensor_b, scatter_indices, out_dim);
-    } else if (tensor_a.dtype() == c10::kFloat) {
-        return forward_t<float>(tensor_a, tensor_b, scatter_indices, out_dim);
-    } else {
-        throw std::runtime_error("Unsupported dtype");
-    }
-}
-
 
 template<typename scalar_t>
-std::vector<torch::Tensor> backward_t(torch::Tensor grad_output, torch::Tensor tensor_a, torch::Tensor tensor_b, torch::Tensor scatter_indices, long out_dim) {
+std::vector<torch::Tensor> backward_t(torch::Tensor grad_output, torch::Tensor tensor_a, torch::Tensor tensor_b, torch::Tensor scatter_indices, torch::Tensor first_occurrences, long out_dim) {
 
     long size_a = tensor_a.size(1);
     long size_b = tensor_b.size(1);
@@ -82,19 +67,20 @@ std::vector<torch::Tensor> backward_t(torch::Tensor grad_output, torch::Tensor t
     torch::Tensor grad_a = torch::Tensor();
     torch::Tensor grad_b = torch::Tensor();
 
-    std::vector<long> first_occurrences = find_first_occurrences(scatter_indices, out_dim);
     scalar_t* grad_output_ptr = grad_output.data_ptr<scalar_t>();
     scalar_t* tensor_a_ptr = tensor_a.data_ptr<scalar_t>();
     scalar_t* tensor_b_ptr = tensor_b.data_ptr<scalar_t>();
     long* scatter_indices_ptr = scatter_indices.data_ptr<long>();
+    long* first_occurrences_ptr = first_occurrences.data_ptr<long>();
 
+    
     if (tensor_a.requires_grad()) {
         grad_a = torch::zeros_like(tensor_a);
         scalar_t* grad_a_ptr = grad_a.data_ptr<scalar_t>();
 
         #pragma omp parallel for
         for (long idx_out = 0; idx_out < out_dim; idx_out++) {
-            long idx_in = first_occurrences[idx_out];
+            long idx_in = first_occurrences_ptr[idx_out];
             if (idx_in < 0) continue;
             while (scatter_indices_ptr[idx_in] == idx_out) {
                 for (long idx_a = 0; idx_a < size_a; idx_a++) {
@@ -114,7 +100,7 @@ std::vector<torch::Tensor> backward_t(torch::Tensor grad_output, torch::Tensor t
 
         #pragma omp parallel for
         for (long idx_out = 0; idx_out < out_dim; idx_out++) {
-            long idx_in = first_occurrences[idx_out];
+            long idx_in = first_occurrences_ptr[idx_out];
             if (idx_in < 0) continue;
             while (scatter_indices_ptr[idx_in] == idx_out) {
                 for (long idx_a = 0; idx_a < size_a; idx_a++) {
@@ -128,15 +114,44 @@ std::vector<torch::Tensor> backward_t(torch::Tensor grad_output, torch::Tensor t
         }
     }
 
-    return {grad_a, grad_b, torch::Tensor(), torch::Tensor()};
+    return {grad_a, grad_b};
 }
 
-std::vector<torch::Tensor> backward(torch::Tensor grad_output, torch::Tensor tensor_a, torch::Tensor tensor_b, torch::Tensor scatter_indices, long out_dim) {
+
+torch::Tensor forward(
+    torch::Tensor tensor_a,
+    torch::Tensor tensor_b,
+    torch::Tensor scatter_indices,
+    torch::Tensor first_occurrences,
+    long out_dim
+) {
+    
     // Dispatch type by hand
     if (tensor_a.dtype() == c10::kDouble) {
-        return backward_t<double>(grad_output, tensor_a, tensor_b, scatter_indices, out_dim);
+        return forward_t<double>(tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim);
     } else if (tensor_a.dtype() == c10::kFloat) {
-        return backward_t<float>(grad_output, tensor_a, tensor_b, scatter_indices, out_dim);
+        return forward_t<float>(tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim);
+    } else {
+        throw std::runtime_error("Unsupported dtype");
+    }
+}
+
+
+static std::vector<torch::Tensor> backward(
+    torch::Tensor grad_output,
+    torch::Tensor tensor_a,
+    torch::Tensor tensor_b,
+    torch::Tensor scatter_indices,
+    torch::Tensor first_occurrences,
+    long out_dim
+) {
+
+    std::vector<torch::Tensor> result;
+    // Dispatch type by hand
+    if (tensor_a.dtype() == c10::kDouble) {
+        return backward_t<double>(grad_output, tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim);
+    } else if (tensor_a.dtype() == c10::kFloat) {
+        return backward_t<float>(grad_output, tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim);
     } else {
         throw std::runtime_error("Unsupported dtype");
     }
@@ -144,6 +159,7 @@ std::vector<torch::Tensor> backward(torch::Tensor grad_output, torch::Tensor ten
 
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("forward", &forward, "ops forward cpu");
-  m.def("backward", &backward, "ops backward cpu");
+    m.def("forward", &forward, "ops forward cpu");
+    m.def("backward", &backward, "ops backward cpu");
+    m.def("find_first_occurrences", &find_first_occurrences, "find first occurrences");
 }

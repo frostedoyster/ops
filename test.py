@@ -1,4 +1,5 @@
 import torch
+torch.manual_seed(0)
 from ops import ref_ops, opt_ops
 
 
@@ -10,6 +11,7 @@ def test(dtype, device):
     a_opt = a_ref.clone().detach().requires_grad_(True)
     b_opt = b_ref.clone().detach().requires_grad_(True)
     indices = torch.sort(torch.randint(10, (100,), device=device))[0]
+    indices[torch.where(indices==1)[0]] = 2  # substitute all 1s by 2s so as to test the no-neighbor case
     out_ref = ref_ops(a_ref, b_ref, indices, 10)
     out_opt = opt_ops(a_opt, b_opt, indices, 10)
     assert torch.allclose(out_ref, out_opt)
@@ -18,7 +20,6 @@ def test(dtype, device):
     loss_ref.backward()
     loss_opt = torch.sum(out_opt)
     loss_opt.backward()
-    print(a_ref.grad, a_opt.grad)
     assert torch.allclose(a_ref.grad, a_opt.grad)
     assert torch.allclose(b_ref.grad, b_opt.grad)
 

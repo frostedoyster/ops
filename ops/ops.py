@@ -34,25 +34,28 @@ class OptOps(torch.autograd.Function):
         tensor_a = tensor_a.contiguous()
         tensor_b = tensor_b.contiguous()
         scatter_indices = scatter_indices.contiguous()
-        
-        ctx.save_for_backward(tensor_a, tensor_b, scatter_indices)
 
         if tensor_a.is_cuda:
-            return ops_cuda.forward(tensor_a, tensor_b, scatter_indices, out_dim)
+            pass
         else:
-            return ops_cc.forward(tensor_a, tensor_b, scatter_indices, out_dim)
+            first_occurrences = ops_cc.find_first_occurrences(scatter_indices, out_dim)
+            ctx.save_for_backward(tensor_a, tensor_b, scatter_indices)
+            ctx.out_dim = out_dim
+            ctx.first_occurrences = first_occurrences
+            return ops_cc.forward(tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim)
 
     @staticmethod
-    def backward(ctx, grad_output):
-
-        tensor_a, tensor_b, scatter_indices = ctx.saved_tensors
-        out_dim = grad_output.shape[0]        
+    def backward(ctx, grad_output):  
         
-        if tensor_a.is_cuda:
-            grad_a, grad_b, _, _ = ops_cuda.backward(grad_output.contiguous(), tensor_a, tensor_b, scatter_indices, out_dim)
+        if grad_output.is_cuda:
+            pass
         else:
-            grad_a, grad_b, _, _ = ops_cc.backward(grad_output.contiguous(), tensor_a, tensor_b, scatter_indices, out_dim)
-        
-        return grad_a, grad_b, None, None
+            tensor_a, tensor_b, scatter_indices = ctx.saved_variables
+            out_dim = ctx.out_dim
+            first_occurrences = ctx.first_occurrences
+            result = ops_cc.backward(grad_output.contiguous(), tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim)
+
+        return result[0], result[1], None, None
+
 
 opt_ops = OptOps.apply  # simply rename the function to make it easier to call
