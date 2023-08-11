@@ -123,7 +123,7 @@ This function takes a sorted input sender_list, which maps each edge to a node b
 
 This is required by the CUDA code so we can send all calculations per-node to a single block.
 
-the function loads 1024 + 1 elements into shared memory, and then loops through the buffer twice. Once for even boundaries, once for odd boundaries.
+the function loads NEIGHBOUR_NEDGES_PER_BLOCK + 1 elements into shared memory, and then loops through the buffer twice. Once for even boundaries, once for odd boundaries.
 */
 
 __global__ void calculate_neighbours_kernel(const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> sender_list,
