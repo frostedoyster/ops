@@ -14,6 +14,7 @@ def benchmark(dtype, device):
     print(f"--DTYPE: {dtype}")
     print(f"Benchmarking dtype {dtype} and device {device}")
     print(f"nodes: {nnodes} and edges: {nedges}")
+    print(f"nfeatures: {nfeatures} and nsphericalharmonics: {nl}")
     a = torch.rand((nedges, nfeatures), dtype=dtype,
                    device=device, requires_grad=True)
     b = torch.rand((nedges, nl), dtype=dtype,
