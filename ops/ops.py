@@ -45,7 +45,9 @@ class OptOps(torch.autograd.Function):
             return ops_cc.forward(tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim)
 
     @staticmethod
-    def backward(ctx, grad_output):  
+    def backward(ctx, grad_output): 
+
+        grad_output = grad_output.contiguous() 
         
         if grad_output.is_cuda:
             pass
@@ -53,7 +55,7 @@ class OptOps(torch.autograd.Function):
             tensor_a, tensor_b, scatter_indices = ctx.saved_variables
             out_dim = ctx.out_dim
             first_occurrences = ctx.first_occurrences
-            result = ops_cc.backward(grad_output.contiguous(), tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim)
+            result = ops_cc.backward(grad_output, tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim)
 
         return result[0], result[1], None, None
 

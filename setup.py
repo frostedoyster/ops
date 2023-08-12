@@ -5,7 +5,7 @@ from torch import cuda
 ext_module_cpp = cpp_extension.CppExtension(
     'ops_cc', 
     ['ops/ops.cc'],
-    extra_compile_args=['-fopenmp']
+    extra_compile_args=['-fopenmp', '-Wall', '-Werror']
 )
 ext_modules = [ext_module_cpp]
 

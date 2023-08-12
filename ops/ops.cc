@@ -23,7 +23,13 @@ torch::Tensor find_first_occurrences(torch::Tensor scatter_indices, long out_dim
 
 
 template<typename scalar_t>
-torch::Tensor forward_t(torch::Tensor tensor_a, torch::Tensor tensor_b, torch::Tensor scatter_indices, torch::Tensor first_occurrences, long out_dim) {
+torch::Tensor forward_t(
+    torch::Tensor tensor_a,
+    torch::Tensor tensor_b,
+    torch::Tensor scatter_indices,
+    torch::Tensor first_occurrences,
+    long out_dim
+) {
 
     long size_scatter = scatter_indices.size(0);
     long size_a = tensor_a.size(1);
@@ -59,7 +65,14 @@ torch::Tensor forward_t(torch::Tensor tensor_a, torch::Tensor tensor_b, torch::T
 
 
 template<typename scalar_t>
-std::vector<torch::Tensor> backward_t(torch::Tensor grad_output, torch::Tensor tensor_a, torch::Tensor tensor_b, torch::Tensor scatter_indices, torch::Tensor first_occurrences, long out_dim) {
+std::vector<torch::Tensor> backward_t(
+    torch::Tensor grad_output,
+    torch::Tensor tensor_a,
+    torch::Tensor tensor_b,
+    torch::Tensor scatter_indices,
+    torch::Tensor first_occurrences,
+    long out_dim
+) {
 
     long size_a = tensor_a.size(1);
     long size_b = tensor_b.size(1);
@@ -125,7 +138,6 @@ torch::Tensor forward(
     torch::Tensor first_occurrences,
     long out_dim
 ) {
-    
     // Dispatch type by hand
     if (tensor_a.dtype() == c10::kDouble) {
         return forward_t<double>(tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim);
@@ -137,7 +149,7 @@ torch::Tensor forward(
 }
 
 
-static std::vector<torch::Tensor> backward(
+std::vector<torch::Tensor> backward(
     torch::Tensor grad_output,
     torch::Tensor tensor_a,
     torch::Tensor tensor_b,
@@ -145,8 +157,6 @@ static std::vector<torch::Tensor> backward(
     torch::Tensor first_occurrences,
     long out_dim
 ) {
-
-    std::vector<torch::Tensor> result;
     // Dispatch type by hand
     if (tensor_a.dtype() == c10::kDouble) {
         return backward_t<double>(grad_output, tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim);
