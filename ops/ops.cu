@@ -26,201 +26,6 @@ __global__ void forward_kernel(
     const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> indices,
     torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> output)
 {
-    extern __shared__ char buffer[];
-    size_t offset = 0;
-    scalar_t *smem = reinterpret_cast<scalar_t *>(buffer + offset);
-
-    int32_t edge_start = indices[blockIdx.x];
-    int32_t edge_end = 0;
-
-    if (blockIdx.x == indices.size(0) - 1)
-    {
-        edge_end = Y.size(0) - 1;
-    }
-    else
-    {
-        edge_end = indices[blockIdx.x + 1];
-    }
-
-    // clear out shared memory storage...
-    for (int32_t m = threadIdx.y; m < Y.size(1); m += blockDim.y)
-    {
-        for (int32_t x_id = threadIdx.x; x_id < X.size(1); x_id += blockDim.x)
-        {
-            smem[m * X.size(1) + x_id] = 0.0;
-        }
-    }
-
-    __syncthreads();
-
-    for (int32_t i = edge_start; i < edge_end; i++)
-    {
-        for (int32_t m = threadIdx.y; m < Y.size(1); m += blockDim.y)
-        {
-            scalar_t y = Y[i][m];
-
-            for (int32_t x_id = threadIdx.x; x_id < X.size(1); x_id += blockDim.x)
-            {
-                scalar_t x = X[i][x_id];
-
-                smem[m * X.size(1) + x_id] += x * y;
-            }
-        }
-    }
-
-    __syncthreads();
-
-    for (int32_t m = threadIdx.y; m < Y.size(1); m += blockDim.y)
-    {
-        for (int32_t x_id = threadIdx.x; x_id < X.size(1); x_id += blockDim.x)
-        {
-            output[blockIdx.x][m][x_id] = smem[m * X.size(1) + x_id];
-        }
-    }
-}
-
-torch::Tensor forward_gpu(torch::Tensor X,
-                          torch::Tensor Y,
-                          torch::Tensor neighbour_indices,
-                          int32_t natoms,
-                          int32_t nthreadx,
-                          int32_t nthready,
-                          int32_t nthreadz)
-{
-
-    torch::Tensor output = torch::empty({natoms, Y.size(1), X.size(1)},
-                                        torch::TensorOptions()
-                                            .dtype(X.dtype())
-                                            .device(X.device()));
-
-    dim3 block_dim(natoms);
-
-    dim3 grid_dim(nthreadx, nthready, 1);
-
-    AT_DISPATCH_FLOATING_TYPES(
-        X.type(), "forward_gpu", ([&]
-                                  {
-                    size_t total_buff_size = 0;
-
-                    total_buff_size += X.size(1) * Y.size(1) * sizeof(scalar_t);
-
-                    forward_kernel<scalar_t><<<block_dim, grid_dim, total_buff_size>>>(
-                        X.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-                        Y.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-                        neighbour_indices.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
-                        output.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>()); }));
-
-    cudaDeviceSynchronize();
-
-    return output;
-}
-
-template <typename scalar_t>
-__global__ void forward2_kernel(
-    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> X,
-    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> Y,
-    const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> indices,
-    torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> output)
-{
-    extern __shared__ char buffer[];
-    size_t offset = 0;
-    scalar_t *smem = reinterpret_cast<scalar_t *>(buffer + offset);
-
-    int32_t edge_start = indices[blockIdx.x];
-    int32_t edge_end = 0;
-
-    if (blockIdx.x == indices.size(0) - 1)
-    {
-        edge_end = Y.size(0) - 1;
-    }
-    else
-    {
-        edge_end = indices[blockIdx.x + 1];
-    }
-
-    int32_t feat_start = blockIdx.y * blockDim.x;
-
-    // clear out shared memory storage...
-    for (int32_t m = threadIdx.y; m < Y.size(1); m += blockDim.y)
-    {
-        smem[m * blockDim.x + threadIdx.x] = 0.0;
-    }
-
-    __syncthreads();
-
-    for (int32_t i = edge_start; i < edge_end; i++)
-    {
-        for (int32_t m = threadIdx.y; m < Y.size(1); m += blockDim.y)
-        {
-            scalar_t y = Y[i][m];
-
-            scalar_t x = 0.0;
-
-            if (feat_start + threadIdx.x < X.size(1))
-            {
-                x = X[i][feat_start + threadIdx.x];
-            }
-
-            smem[m * blockDim.x + threadIdx.x] += x * y;
-        }
-    }
-
-    __syncthreads();
-
-    for (int32_t m = threadIdx.y; m < Y.size(1); m += blockDim.y)
-    {
-        if (feat_start + threadIdx.x < X.size(1))
-        {
-            output[blockIdx.x][m][feat_start + threadIdx.x] = smem[m * blockDim.x + threadIdx.x];
-        }
-    }
-}
-
-torch::Tensor forward2_gpu(torch::Tensor X,
-                           torch::Tensor Y,
-                           torch::Tensor neighbour_indices,
-                           int32_t natoms,
-                           int32_t nthreadx,
-                           int32_t nthready,
-                           int32_t nthreadz)
-{
-
-    torch::Tensor output = torch::empty({natoms, Y.size(1), X.size(1)},
-                                        torch::TensorOptions()
-                                            .dtype(X.dtype())
-                                            .device(X.device()));
-
-    int32_t nby = find_integer_divisor(X.size(1), nthreadx);
-
-    dim3 block_dim(natoms, nby);
-
-    dim3 grid_dim(nthreadx, nthready, 1);
-
-    AT_DISPATCH_FLOATING_TYPES(
-        X.type(), "forward2_gpu", ([&]
-                                   {
-                    size_t total_buff_size = 0;
-
-                    total_buff_size += nthreadx * Y.size(1) * sizeof(scalar_t);
-
-                    forward2_kernel<scalar_t><<<block_dim, grid_dim, total_buff_size>>>(
-                        X.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-                        Y.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-                        neighbour_indices.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
-                        output.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>()); }));
-
-    cudaDeviceSynchronize();
-
-    return output;
-}
-
-template <typename scalar_t>
-__global__ void forward3_kernel(
-    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> X,
-    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> Y,
-    const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> indices,
-    torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> output)
-{
 
     int32_t edge_start = indices[blockIdx.x];
     int32_t edge_end = 0;
@@ -263,13 +68,13 @@ __global__ void forward3_kernel(
     }
 }
 
-torch::Tensor forward3_gpu(torch::Tensor X,
-                           torch::Tensor Y,
-                           torch::Tensor neighbour_indices,
-                           int32_t natoms,
-                           int32_t nthreadx,
-                           int32_t nthready,
-                           int32_t nthreadz)
+torch::Tensor forward_gpu(torch::Tensor X,
+                          torch::Tensor Y,
+                          torch::Tensor neighbour_indices,
+                          int32_t natoms,
+                          int32_t nthreadx,
+                          int32_t nthready,
+                          int32_t nthreadz)
 {
 
     torch::Tensor output = torch::empty({natoms, Y.size(1), X.size(1)},
@@ -284,13 +89,13 @@ torch::Tensor forward3_gpu(torch::Tensor X,
     dim3 grid_dim(nthreadx, nthready, 1);
 
     AT_DISPATCH_FLOATING_TYPES(
-        X.type(), "forward3_gpu", ([&]
-                                   {
+        X.type(), "forward_gpu", ([&]
+                                  {
                     size_t total_buff_size = 0;
 
                     //total_buff_size += nthreadx * Y.size(1) * sizeof(scalar_t);
 
-                    forward3_kernel<scalar_t><<<block_dim, grid_dim, total_buff_size>>>(
+                    forward_kernel<scalar_t><<<block_dim, grid_dim, total_buff_size>>>(
                         X.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                         Y.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                         neighbour_indices.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
