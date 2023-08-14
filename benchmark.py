@@ -17,14 +17,14 @@ def benchmark(dtype, device):
     loss.backward()
 
     start = time.time()
-    for _ in range(100):
+    for _ in range(1000):
         loss = torch.sum(ref_ops(a, b, indices, 1000))
         loss.backward()
     finish = time.time()
     print(f"The pure torch implementation took {finish-start} seconds")
 
     start = time.time()
-    for _ in range(100):
+    for _ in range(1000):
         loss = torch.sum(opt_ops(a, b, indices, 1000))
         loss.backward()
     finish = time.time()
