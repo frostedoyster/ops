@@ -213,6 +213,4 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     m.def("calculate_neighbours", &calculate_neighbours_gpu, "computes neighbourlist starts from sender list.");
     m.def("forward", &forward_gpu, "ops forward GPU.");
-    m.def("forward2", &forward2_gpu, "ops forward 2 GPU.");
-    m.def("forward3", &forward3_gpu, "ops forward 2 GPU.");
 }
