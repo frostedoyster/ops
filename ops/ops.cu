@@ -112,6 +112,276 @@ torch::Tensor forward_gpu(torch::Tensor X,
     return output;
 }
 
+template <typename scalar_t>
+__global__ void backward1_kernel(
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> X,
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> Y,
+    const torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> grad_in, // [nnodes, m, feat]
+    const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> indices,
+    const bool requires_grad_X,
+    const bool requires_grad_Y,
+    torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> grad_X,
+    torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> grad_Y)
+{
+    extern __shared__ char buffer[];
+    size_t offset = 0;
+    scalar_t *buffer_dX = reinterpret_cast<scalar_t *>(buffer + offset);
+    offset += blockDim.x * sizeof(scalar_t);
+
+    scalar_t *buffer_dY = reinterpret_cast<scalar_t *>(buffer + offset);
+    offset += 128 * blockDim.y * sizeof(scalar_t);
+
+    int32_t edge_start = indices[blockIdx.x];
+    int32_t edge_end = 0;
+
+    if (blockIdx.x == indices.size(0) - 1) // nnodes -1
+    {
+        edge_end = Y.size(0) - 1; // nedges -1
+    }
+    else
+    {
+        edge_end = indices[blockIdx.x + 1];
+    }
+
+    int32_t nedges = edge_end - edge_start;
+
+    // check if this node has neighbours
+    if (nedges == 0)
+    {
+        return;
+    }
+
+    int32_t feat_start = blockIdx.y * blockDim.x;
+
+    bool valid = feat_start + threadIdx.x < X.size(1);
+
+    __syncthreads();
+
+    for (int32_t m = threadIdx.y; m < Y.size(1); m += blockDim.y)
+    {
+
+        scalar_t tmp_grad_in = 0.0;
+
+        if (valid)
+            tmp_grad_in = grad_in[blockIdx.x][m][feat_start];
+
+        for (int32_t i = edge_start; i < edge_end; i++)
+        {
+            buffer_dY[threadIdx.y * nedges + (i - edge_start)] = 0.0;
+
+            /*if (requires_grad_X)
+            {
+                // need to sum over m dimension
+
+                buffer_dX[threadIdx.x] = 0.0;
+
+                scalar_t y = Y[i][m];
+
+                scalar_t tmp_grad_x = tmp_grad_in * y;
+
+                atomicAdd(&buffer_dX[threadIdx.x], tmp_grad_x);
+
+                __syncwarp();
+
+                if (threadIdx.y == 0)
+                {
+                    grad_X[i][feat_start + threadIdx.x] = buffer_dX[threadIdx.x];
+                }
+            }*/
+
+            if (requires_grad_Y)
+            {
+                scalar_t x = 0.0;
+
+                if (valid)
+                {
+                    x = X[i][feat_start + threadIdx.x];
+                }
+
+                scalar_t tmp_grad_y = tmp_grad_in * x;
+
+                // need to warp reduce over X dimension
+                for (int32_t offset = blockDim.x / 2; offset > 0; offset /= 2)
+                {
+                    tmp_grad_y += __shfl_down_sync(FULL_MASK, tmp_grad_y, offset);
+                }
+
+                if (threadIdx.x == 0)
+                {
+                    buffer_dY[threadIdx.y * nedges + (i - edge_start)] = tmp_grad_y;
+                }
+            }
+        }
+
+        __syncwarp();
+
+        for (int32_t i = threadIdx.x; i < nedges; i += blockDim.x)
+        {
+            grad_Y[edge_start + i][m] = buffer_dY[threadIdx.y * nedges + i];
+        }
+    }
+}
+
+template <typename scalar_t>
+__global__ void backward2_kernel(
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> X,
+    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> Y,
+    const torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> grad_in, // [nnodes, m, feat]
+    const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> indices,
+    const bool requires_grad_X,
+    const bool requires_grad_Y,
+    torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> grad_X,
+    torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> grad_Y)
+{
+
+    extern __shared__ char buffer[];
+    size_t offset = 0;
+    scalar_t *buffer_dX = reinterpret_cast<scalar_t *>(buffer + offset);
+
+    int32_t edge_start = indices[blockIdx.x];
+    int32_t edge_end = 0;
+
+    if (blockIdx.x == indices.size(0) - 1) // nnodes -1
+    {
+        edge_end = Y.size(0) - 1; // nedges -1
+    }
+    else
+    {
+        edge_end = indices[blockIdx.x + 1];
+    }
+    int32_t nedges = edge_end - edge_start;
+
+    // check if this node has neighbours
+    if (nedges == 0)
+    {
+        return;
+    }
+
+    int32_t feat_start = blockIdx.y * blockDim.x;
+
+    bool valid = feat_start + threadIdx.x < X.size(1);
+
+    __syncthreads();
+
+    for (int32_t m = threadIdx.y; m < Y.size(1); m += blockDim.y)
+    {
+        scalar_t tmp_grad_in = grad_in[blockIdx.x][m][feat_start];
+
+        for (int32_t i = edge_start; i < edge_end; i++)
+        {
+
+            if (requires_grad_X)
+            {
+                // need to sum over m dimension
+
+                buffer_dX[threadIdx.x] = 0.0;
+
+                scalar_t y = Y[i][m];
+
+                scalar_t tmp_grad_x = tmp_grad_in * y;
+
+                atomicAdd(&buffer_dX[threadIdx.x], tmp_grad_x);
+
+                __syncwarp();
+
+                if (threadIdx.y == 0)
+                {
+                    grad_X[i][feat_start + threadIdx.x] = buffer_dX[threadIdx.x];
+                }
+            }
+
+            if (requires_grad_Y)
+            {
+                scalar_t x = 0.0;
+
+                if (valid)
+                {
+                    x = X[i][feat_start + threadIdx.x];
+                }
+
+                scalar_t tmp_grad_y = tmp_grad_in * x;
+
+                // need to warp reduce over X dimension
+                for (int32_t offset = blockDim.x / 2; offset > 0; offset /= 2)
+                {
+                    tmp_grad_y += __shfl_down_sync(FULL_MASK, tmp_grad_y, offset);
+                }
+
+                if (threadIdx.x == 0)
+                {
+                    grad_Y[i][m] = tmp_grad_y;
+                }
+            }
+        }
+    }
+}
+
+std::vector<torch::Tensor> backward2_gpu(torch::Tensor X,
+                                         torch::Tensor Y,
+                                         torch::Tensor grad_in,
+                                         torch::Tensor neighbour_indices,
+                                         int32_t natoms,
+                                         int32_t nthreadx,
+                                         int32_t nthready,
+                                         int32_t nthreadz)
+{
+
+    torch::Tensor gradX;
+
+    if (X.requires_grad())
+    {
+        gradX = torch::empty_like(X,
+                                  torch::TensorOptions()
+                                      .dtype(X.dtype())
+                                      .device(X.device()));
+    }
+    else
+    {
+        gradX = torch::Tensor();
+    }
+
+    torch::Tensor gradY;
+
+    if (Y.requires_grad())
+    {
+        gradY = torch::empty_like(Y,
+                                  torch::TensorOptions()
+                                      .dtype(Y.dtype())
+                                      .device(Y.device()));
+    }
+    else
+    {
+        gradX = torch::Tensor();
+    }
+
+    int32_t nby = find_integer_divisor(X.size(1), nthreadx);
+
+    dim3 block_dim(natoms, nby);
+
+    dim3 grid_dim(nthreadx, nthready, 1);
+
+    AT_DISPATCH_FLOATING_TYPES(
+        X.type(), "backward2_gpu", ([&]
+                                    {
+        size_t total_buff_size = 0;
+
+        total_buff_size += nthreadx * sizeof(scalar_t);
+
+            backward2_kernel<scalar_t><<<block_dim, grid_dim, total_buff_size>>>(
+                X.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                Y.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                grad_in.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>(),
+                neighbour_indices.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
+                X.requires_grad(),
+                Y.requires_grad(),
+                gradX.packed_accessor32<scalar_t,2, torch::RestrictPtrTraits>(),
+                gradY.packed_accessor32<scalar_t,2, torch::RestrictPtrTraits>()); }));
+
+    cudaDeviceSynchronize();
+
+    return {gradX, gradY};
+}
+
 #define NEIGHBOUR_NEDGES_PER_BLOCK 512
 
 /*
@@ -189,7 +459,6 @@ __global__ void calculate_neighbours_kernel(const torch::PackedTensorAccessor32<
 
 torch::Tensor calculate_neighbours_gpu(torch::Tensor sender_list, int32_t natoms, int32_t nthreadx)
 {
-
     torch::Tensor output_indices = torch::empty(natoms,
                                                 torch::TensorOptions()
                                                     .dtype(sender_list.dtype())
@@ -219,4 +488,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     m.def("calculate_neighbours", &calculate_neighbours_gpu, "computes neighbourlist starts from sender list.");
     m.def("forward", &forward_gpu, "ops forward GPU.");
+    m.def("backward2", &backward2_gpu, "ops backward GPU.");
 }

@@ -33,7 +33,7 @@ def benchmark(dtype, device):
     X = a.cuda()
     Y = b.cuda()
 
-    #warmup
+    # warmup
     for _ in range(1000):
         output_cuda = ops_cuda.forward(X, Y, neighbour_cuda, nnodes,  32, 4, 1)
 
@@ -42,7 +42,31 @@ def benchmark(dtype, device):
         output_cuda = ops_cuda.forward(X, Y, neighbour_cuda, nnodes,  32, 4, 1)
     finish = time.time()
     print(f"The CUDA implementation forward took {finish-start} seconds")
-    print (output_cuda[0])
+
+    grad_in = torch.ones_like(output_cuda)
+
+    start = time.time()
+    for _ in range(1000):
+        dX, dY = ops_cuda.backward2(
+            X, Y, grad_in, neighbour_cuda, nnodes, 32, 4, 1)
+    finish = time.time()
+    print(f"The CUDA implementation backward took {finish-start} seconds")
+
+    start = time.time()
+    for _ in range(1000):
+        ref_ops(X, Y, indices_cuda, nnodes)
+    torch.cuda.synchronize()
+    finish = time.time()
+
+    print(f"The ref torch implementation forward took {finish-start} seconds")
+
+    start = time.time()
+    for _ in range(1000):
+        loss = torch.sum(ref_ops(X, Y, indices_cuda, nnodes))
+        loss.backward()
+    torch.cuda.synchronize()
+    finish = time.time()
+    print(f"The ref torch implementation backward took {finish-start} seconds")
 
     start = time.time()
     for _ in range(1000):
