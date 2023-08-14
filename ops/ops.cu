@@ -235,7 +235,7 @@ __global__ void forward3_kernel(
     }
 
     int32_t feat_start = blockIdx.y * blockDim.x;
-    
+
     bool valid = feat_start + threadIdx.x < X.size(1);
 
     __syncthreads();
@@ -258,7 +258,8 @@ __global__ void forward3_kernel(
             tmp_output += x * y;
         }
 
-        output[blockIdx.x][m][feat_start + threadIdx.x] = tmp_output;
+        if (valid)
+            output[blockIdx.x][m][feat_start + threadIdx.x] = tmp_output;
     }
 }
 
