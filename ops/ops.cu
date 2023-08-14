@@ -30,9 +30,9 @@ __global__ void forward_kernel(
     int32_t edge_start = indices[blockIdx.x];
     int32_t edge_end = 0;
 
-    if (blockIdx.x == indices.size(0) - 1)
+    if (blockIdx.x == indices.size(0) - 1) // nnodes -1
     {
-        edge_end = Y.size(0) - 1;
+        edge_end = Y.size(0) - 1; // nedges -1
     }
     else
     {
