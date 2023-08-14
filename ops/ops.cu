@@ -39,6 +39,12 @@ __global__ void forward_kernel(
         edge_end = indices[blockIdx.x + 1];
     }
 
+    // check if this node has neighbours
+    if (edge_end - edge_start == 0)
+    {
+        return;
+    }
+
     int32_t feat_start = blockIdx.y * blockDim.x;
 
     bool valid = feat_start + threadIdx.x < X.size(1);
