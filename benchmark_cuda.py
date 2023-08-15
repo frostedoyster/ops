@@ -47,10 +47,24 @@ def benchmark(dtype, device):
 
     start = time.time()
     for _ in range(1000):
+        dX, dY = ops_cuda.backward1(
+            X, Y, grad_in, neighbour_cuda, nnodes, 32, 4, 1)
+    finish = time.time()
+    print(f"The CUDA implementation backward 1 took {finish-start} seconds")
+
+    start = time.time()
+    for _ in range(1000):
         dX, dY = ops_cuda.backward2(
             X, Y, grad_in, neighbour_cuda, nnodes, 32, 4, 1)
     finish = time.time()
-    print(f"The CUDA implementation backward took {finish-start} seconds")
+    print(f"The CUDA implementation backward 2 took {finish-start} seconds")
+
+    start = time.time()
+    for _ in range(1000):
+        dX, dY = ops_cuda.backward3(
+            X, Y, grad_in, indices_cuda, nnodes, 32, 4, 4)
+    finish = time.time()
+    print(f"The CUDA implementation backward 3 took {finish-start} seconds")
 
     start = time.time()
     for _ in range(1000):
@@ -84,7 +98,7 @@ def benchmark(dtype, device):
 
 if __name__ == "__main__":
     benchmark(torch.float32, "cpu")
-    benchmark(torch.float64, "cpu")
+    # benchmark(torch.float64, "cpu")
     # if torch.cuda.is_available():
     #    benchmark(torch.float32, "cuda")
     #    benchmark(torch.float64, "cuda")
