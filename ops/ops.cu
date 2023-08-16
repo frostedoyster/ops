@@ -32,7 +32,7 @@ __global__ void forward_kernel(
 
     if (blockIdx.x == indices.size(0) - 1) // nnodes -1
     {
-        edge_end = Y.size(0) - 1; // nedges -1
+        edge_end = Y.size(0); // nedges -1
     }
     else
     {
@@ -112,37 +112,34 @@ torch::Tensor forward_gpu(torch::Tensor X,
     return output;
 }
 
+#define FEATS_PER_BLOCK_Y 32
+#define M_PER_BLOCK_X 4
+
+// nx = 4, ny = 32
 template <typename scalar_t>
-__global__ void backward1_kernel(
-    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> X,
+__global__ void backward_dX_kernel(
     const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> Y,
     const torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> grad_in, // [nnodes, m, feat]
     const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> indices,
-    const bool requires_grad_X,
-    const bool requires_grad_Y,
-    torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> grad_X,
-    torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> grad_Y)
+    torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> grad_X)
 {
+
     extern __shared__ char buffer[];
     size_t offset = 0;
-    scalar_t *buffer_dX = reinterpret_cast<scalar_t *>(buffer + offset);
-    offset += blockDim.x * sizeof(scalar_t);
-
-    scalar_t *buffer_dY = reinterpret_cast<scalar_t *>(buffer + offset);
-    offset += 128 * blockDim.y * sizeof(scalar_t);
+    scalar_t *buffer_grad_in = reinterpret_cast<scalar_t *>(buffer + offset);
+    offset += FEATS_PER_BLOCK_Y * Y.size(1) * sizeof(scalar_t);
 
     int32_t edge_start = indices[blockIdx.x];
     int32_t edge_end = 0;
 
     if (blockIdx.x == indices.size(0) - 1) // nnodes -1
     {
-        edge_end = Y.size(0) - 1; // nedges -1
+        edge_end = Y.size(0); // nedges -1
     }
     else
     {
         edge_end = indices[blockIdx.x + 1];
     }
-
     int32_t nedges = edge_end - edge_start;
 
     // check if this node has neighbours
@@ -150,100 +147,96 @@ __global__ void backward1_kernel(
     {
         return;
     }
+    int global_tid = threadIdx.y * blockDim.x + threadIdx.x; // [0 - 128], ny = 4, nx = 32
 
-    int32_t feat_start = blockIdx.y * blockDim.x;
+    int32_t feat_start = blockIdx.y * FEATS_PER_BLOCK_Y; // each block handles FEATS_PER_BLOCK_Y features
 
-    bool valid = feat_start + threadIdx.x < X.size(1);
+    {
+        int nx = 32;
+        int tidx = global_tid % nx;
+        int tidy = global_tid / nx;
+        int ny = (blockDim.y * blockDim.x) / nx;
+
+        for (int m = tidy; m < Y.size(1); m += ny)
+        {
+            scalar_t val = 0.0;
+
+            if (feat_start + tidx < grad_in.size(2))
+            {
+                val = grad_in[blockIdx.x][m][feat_start + tidx];
+            }
+
+            buffer_grad_in[m * FEATS_PER_BLOCK_Y + tidx] = val;
+        }
+    }
 
     __syncthreads();
+    int niter_m = find_integer_divisor(Y.size(1), blockDim.x);             // 16 / 4
+    int niter_gradx = find_integer_divisor(FEATS_PER_BLOCK_Y, blockDim.y); // 32 / 32
 
-    for (int32_t m = threadIdx.y; m < Y.size(1); m += blockDim.y)
+    for (int32_t i = edge_start; i < edge_end; i++)
     {
-
-        scalar_t tmp_grad_in = 0.0;
-
-        if (valid)
-            tmp_grad_in = grad_in[blockIdx.x][m][feat_start];
-
-        for (int32_t i = edge_start; i < edge_end; i++)
+        for (int x_idx = 0; x_idx < niter_gradx; x_idx++)
         {
-            buffer_dY[threadIdx.y * nedges + (i - edge_start)] = 0.0;
+            int feat = feat_start + x_idx * blockDim.y + threadIdx.y;
 
-            /*if (requires_grad_X)
+            scalar_t tmp_output = 0.0;
+
+            // need to reduce along the m dimension, so we divide threads into groups of 4 or 8 and then do warp reductions across those subgroups.
+            for (int y_idx = 0; y_idx < niter_m; y_idx++)
             {
-                // need to sum over m dimension
+                int m = y_idx * blockDim.x + threadIdx.x;
 
-                buffer_dX[threadIdx.x] = 0.0;
+                scalar_t y = 0.0;
+                scalar_t tmp_grad_in = 0.0;
 
-                scalar_t y = Y[i][m];
-
-                scalar_t tmp_grad_x = tmp_grad_in * y;
-
-                atomicAdd(&buffer_dX[threadIdx.x], tmp_grad_x);
-
-                __syncwarp();
-
-                if (threadIdx.y == 0)
+                if (m < Y.size(1) && feat < grad_in.size(2))
                 {
-                    grad_X[i][feat_start + threadIdx.x] = buffer_dX[threadIdx.x];
-                }
-            }*/
-
-            if (requires_grad_Y)
-            {
-                scalar_t x = 0.0;
-
-                if (valid)
-                {
-                    x = X[i][feat_start + threadIdx.x];
+                    tmp_grad_in = buffer_grad_in[m * FEATS_PER_BLOCK_Y + threadIdx.y];
                 }
 
-                scalar_t tmp_grad_y = tmp_grad_in * x;
-
-                // need to warp reduce over X dimension
-                for (int32_t offset = blockDim.x / 2; offset > 0; offset /= 2)
+                if (m < Y.size(1))
                 {
-                    tmp_grad_y += __shfl_down_sync(FULL_MASK, tmp_grad_y, offset);
+                    y = Y[i][m];
                 }
 
-                if (threadIdx.x == 0)
+                scalar_t tmp_grad = tmp_grad_in * y;
+
+                for (int offset = blockDim.x / 2; offset > 0; offset /= 2)
                 {
-                    buffer_dY[threadIdx.y * nedges + (i - edge_start)] = tmp_grad_y;
+                    tmp_grad += __shfl_down_sync(FULL_MASK, tmp_grad, offset);
                 }
+
+                tmp_output += tmp_grad;
             }
-        }
 
-        __syncwarp();
-
-        for (int32_t i = threadIdx.x; i < nedges; i += blockDim.x)
-        {
-            grad_Y[edge_start + i][m] = buffer_dY[threadIdx.y * nedges + i];
+            if (threadIdx.x == 0 && feat < grad_in.size(2))
+            {
+                grad_X[i][feat] = tmp_output;
+            }
         }
     }
 }
 
+// ny = 4, nx = 32
 template <typename scalar_t>
-__global__ void backward2_kernel(
-    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> X,
-    const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> Y,
-    const torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> grad_in, // [nnodes, m, feat]
-    const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> indices,
-    const bool requires_grad_X,
-    const bool requires_grad_Y,
-    torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> grad_X,
-    torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> grad_Y)
+__global__ void backward_dY_kernel(const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> X,
+                                   const torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> grad_in, // [nnodes, m, feat]
+                                   const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> indices,
+                                   torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> grad_Y)
 {
 
     extern __shared__ char buffer[];
     size_t offset = 0;
-    scalar_t *buffer_dX = reinterpret_cast<scalar_t *>(buffer + offset);
+    scalar_t *buffer_grad_in = reinterpret_cast<scalar_t *>(buffer + offset);
+    offset += X.size(1) * M_PER_BLOCK_X * sizeof(scalar_t); // e.g 128 x 4
 
     int32_t edge_start = indices[blockIdx.x];
     int32_t edge_end = 0;
 
     if (blockIdx.x == indices.size(0) - 1) // nnodes -1
     {
-        edge_end = Y.size(0) - 1; // nedges -1
+        edge_end = X.size(0); // nedges -1
     }
     else
     {
@@ -257,73 +250,87 @@ __global__ void backward2_kernel(
         return;
     }
 
-    int32_t feat_start = blockIdx.y * blockDim.x;
+    int32_t m_start = blockIdx.y * M_PER_BLOCK_X; // each block handles M_PER_BLOCK_X m indices
 
-    bool valid = feat_start + threadIdx.x < X.size(1);
+    int niter_m = find_integer_divisor(M_PER_BLOCK_X, blockDim.y);
+    int niter_x = find_integer_divisor(X.size(1), blockDim.x);
+
+    for (int m_idx = 0; m_idx < niter_m; m_idx++)
+    {
+        int local_m = m_idx * blockDim.y + threadIdx.y;
+        int global_m = m_start + local_m;
+
+        for (int feat = threadIdx.x; feat < X.size(1); feat += blockDim.x)
+        {
+            scalar_t val = 0.0;
+
+            if (global_m < grad_in.size(1))
+            {
+                val = grad_in[blockIdx.x][global_m][feat];
+            }
+
+            buffer_grad_in[local_m * X.size(1) + feat] = val;
+        }
+    }
 
     __syncthreads();
 
-    for (int32_t m = threadIdx.y; m < Y.size(1); m += blockDim.y)
+    for (int32_t i = edge_start; i < edge_end; i++)
     {
-        scalar_t tmp_grad_in = grad_in[blockIdx.x][m][feat_start];
 
-        for (int32_t i = edge_start; i < edge_end; i++)
+        // need to reduce along the channel dimension
+
+        for (int m_idx = 0; m_idx < niter_m; m_idx++)
         {
+            int local_m = m_idx * blockDim.y + threadIdx.y;
+            int global_m = m_start + m_idx * blockDim.y + threadIdx.y;
 
-            if (requires_grad_X)
+            scalar_t tmp_output = 0.0;
+
+            for (int x_idx = 0; x_idx < niter_x; x_idx++)
             {
-                // need to sum over m dimension
+                int feat = x_idx * blockDim.x + threadIdx.x;
 
-                buffer_dX[threadIdx.x] = 0.0;
+                scalar_t tmp_grad_in = 0.0;
 
-                scalar_t y = Y[i][m];
-
-                scalar_t tmp_grad_x = tmp_grad_in * y;
-
-                atomicAdd(&buffer_dX[threadIdx.x], tmp_grad_x);
-
-                __syncwarp();
-
-                if (threadIdx.y == 0)
+                if (global_m < grad_in.size(1) && feat < X.size(1))
                 {
-                    grad_X[i][feat_start + threadIdx.x] = buffer_dX[threadIdx.x];
+                    tmp_grad_in = buffer_grad_in[local_m * X.size(1) + feat];
                 }
-            }
 
-            if (requires_grad_Y)
-            {
                 scalar_t x = 0.0;
 
-                if (valid)
+                if (feat < X.size(1))
                 {
-                    x = X[i][feat_start + threadIdx.x];
+                    x = X[i][feat];
                 }
 
-                scalar_t tmp_grad_y = tmp_grad_in * x;
+                scalar_t tmp_grad = tmp_grad_in * x;
 
-                // need to warp reduce over X dimension
-                for (int32_t offset = blockDim.x / 2; offset > 0; offset /= 2)
+                for (int offset = blockDim.x / 2; offset > 0; offset /= 2)
                 {
-                    tmp_grad_y += __shfl_down_sync(FULL_MASK, tmp_grad_y, offset);
+                    tmp_grad += __shfl_down_sync(FULL_MASK, tmp_grad, offset);
                 }
 
-                if (threadIdx.x == 0)
-                {
-                    grad_Y[i][m] = tmp_grad_y;
-                }
+                tmp_output += tmp_grad;
+            }
+
+            if (threadIdx.x == 0 && global_m < grad_in.size(1))
+            {
+                grad_Y[i][global_m] = tmp_output;
             }
         }
     }
 }
 
-std::vector<torch::Tensor> backward2_gpu(torch::Tensor X,
-                                         torch::Tensor Y,
-                                         torch::Tensor grad_in,
-                                         torch::Tensor neighbour_indices,
-                                         int32_t natoms,
-                                         int32_t nthreadx,
-                                         int32_t nthready,
-                                         int32_t nthreadz)
+std::vector<torch::Tensor> backward_gpu(torch::Tensor X,
+                                        torch::Tensor Y,
+                                        torch::Tensor grad_in,
+                                        torch::Tensor neighbour_indices,
+                                        int32_t natoms,
+                                        int32_t nthreadx,
+                                        int32_t nthready,
+                                        int32_t nthreadz)
 {
 
     torch::Tensor gradX;
@@ -354,28 +361,41 @@ std::vector<torch::Tensor> backward2_gpu(torch::Tensor X,
         gradX = torch::Tensor();
     }
 
-    int32_t nby = find_integer_divisor(X.size(1), nthreadx);
+    dim3 grid_dim_x(M_PER_BLOCK_X, FEATS_PER_BLOCK_Y, 1);
+    int32_t nbx = find_integer_divisor(X.size(1), FEATS_PER_BLOCK_Y);
+    dim3 block_dim_x(natoms, nbx);
 
-    dim3 block_dim(natoms, nby);
-
-    dim3 grid_dim(nthreadx, nthready, 1);
+    dim3 grid_dim_y(FEATS_PER_BLOCK_Y, M_PER_BLOCK_X, 1);
+    int32_t nby = find_integer_divisor(Y.size(1), M_PER_BLOCK_X);
+    dim3 block_dim_y(natoms, nby);
 
     AT_DISPATCH_FLOATING_TYPES(
-        X.type(), "backward2_gpu", ([&]
-                                    {
-        size_t total_buff_size = 0;
+        X.type(), "backward_gpu",
+        ([&]
+         {
+            if (X.requires_grad())
+            {
+                size_t buff_size_x = 0;
+                buff_size_x += Y.size(1) * FEATS_PER_BLOCK_Y * sizeof(scalar_t);
 
-        total_buff_size += nthreadx * sizeof(scalar_t);
+                backward_dX_kernel<scalar_t><<<block_dim_x, grid_dim_x, buff_size_x>>>(
+                    Y.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                    grad_in.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>(),
+                    neighbour_indices.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
+                    gradX.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>());
+            }
 
-            backward2_kernel<scalar_t><<<block_dim, grid_dim, total_buff_size>>>(
-                X.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-                Y.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-                grad_in.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>(),
-                neighbour_indices.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
-                X.requires_grad(),
-                Y.requires_grad(),
-                gradX.packed_accessor32<scalar_t,2, torch::RestrictPtrTraits>(),
-                gradY.packed_accessor32<scalar_t,2, torch::RestrictPtrTraits>()); }));
+            if (Y.requires_grad())
+            {
+                size_t buff_size_y = 0;
+                buff_size_y += X.size(1) * M_PER_BLOCK_X * sizeof(scalar_t);
+
+                backward_dY_kernel<scalar_t><<<block_dim_y, grid_dim_y, buff_size_y>>>(
+                    X.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                    grad_in.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>(),
+                    neighbour_indices.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
+                    gradY.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>());
+            } }));
 
     cudaDeviceSynchronize();
 
@@ -488,5 +508,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     m.def("calculate_neighbours", &calculate_neighbours_gpu, "computes neighbourlist starts from sender list.");
     m.def("forward", &forward_gpu, "ops forward GPU.");
-    m.def("backward2", &backward2_gpu, "ops backward GPU.");
+    m.def("backward", &backward_gpu, "ops backward GPU.");
 }
