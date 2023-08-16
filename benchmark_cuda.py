@@ -6,7 +6,7 @@ import ops_cuda
 
 def benchmark(dtype, device):
 
-    nedges = 30000
+    nedges = 60000
     nnodes = 1000
     nfeatures = 32
     nl = 5

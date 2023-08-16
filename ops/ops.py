@@ -39,40 +39,41 @@ class OptOps(torch.autograd.Function):
             raise ValueError("The two float tensors must have the same dtype")
 
         # don't think these are needed.
-        #tensor_a = tensor_a.contiguous() 
-        #tensor_b = tensor_b.contiguous()
-        #scatter_indices = scatter_indices.contiguous()
-
-        if (tensor_a.requires_grad or tensor_b.requires_grad):
-            ctx.save_for_backward(tensor_a, tensor_b, scatter_indices)
+        # tensor_a = tensor_a.contiguous()
+        # tensor_b = tensor_b.contiguous()
+        # scatter_indices = scatter_indices.contiguous()
 
         if tensor_a.is_cuda:
-            ctx.first_occurrences = ops_cuda.calculate_neighbours(
+            first_occurrences = ops_cuda.calculate_neighbours(
                 scatter_indices.int(), out_dim, 64)
-            ctx.out_dim = out_dim
-            # to make format similar to C code.
-            return ops_cuda.forward(tensor_a, tensor_b, ctx.first_occurrences, out_dim,  32, 4, 1).transpose(-1, -2)
         else:
             first_occurrences = ops_cc.find_first_occurrences(
                 scatter_indices, out_dim)
-            ctx.out_dim = out_dim
-            ctx.first_occurrences = first_occurrences
+
+        ctx.out_dim = out_dim
+
+        if (tensor_a.requires_grad or tensor_b.requires_grad):
+            ctx.save_for_backward(tensor_a, tensor_b,
+                                  scatter_indices, first_occurrences)
+
+        if tensor_a.is_cuda:
+            # transpose to make format similar to C code.
+            return ops_cuda.forward(tensor_a, tensor_b, first_occurrences, out_dim,  32, 4, 1).transpose(-1, -2)
+        else:
             return ops_cc.forward(tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim)
 
     @staticmethod
     def backward(ctx, grad_output):
 
-        tensor_a, tensor_b, scatter_indices = ctx.saved_variables
+        tensor_a, tensor_b, scatter_indices, first_occurrences = ctx.saved_variables
 
         if grad_output.is_cuda:
 
             out_dim = ctx.out_dim
-            first_occurrences = ctx.first_occurrences
             result = ops_cuda.backward(
                 tensor_a, tensor_b, grad_output.transpose(-1, -2), first_occurrences, out_dim, 128, 1, 1)  # convert grad_output to CUDA ordering.
         else:
             out_dim = ctx.out_dim
-            first_occurrences = ctx.first_occurrences
             result = ops_cc.backward(
                 grad_output, tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim)
 
