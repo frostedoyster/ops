@@ -35,7 +35,7 @@ def benchmark(dtype, device):
     ref_output = ref_ops(a, b, indices, nnodes)
     cuda_output = opt_ops(a_copy, b_copy, indices, nnodes)
 
-    print("fowards consistent? ", torch.allclose(ref_output, cuda_output))
+    print("forwards consistent? ", torch.allclose(ref_output, cuda_output))
 
     loss = torch.sum(ref_output)
     loss.backward()
