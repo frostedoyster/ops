@@ -1,9 +1,10 @@
 import torch
 from . import ops_cc
+from ops import lib # forces torch.load_library
 
 HAS_CUDA = False
+
 if torch.cuda.is_available():
-    from . import ops_cuda
     HAS_CUDA = True
 
 
@@ -44,7 +45,7 @@ class OptOps(torch.autograd.Function):
         # scatter_indices = scatter_indices.contiguous()
 
         if tensor_a.is_cuda:
-            first_occurrences = ops_cuda.calculate_neighbours(
+            first_occurrences = lib.calculate_neighbours(
                 scatter_indices.int(), out_dim, 64)
         else:
             first_occurrences = ops_cc.find_first_occurrences(
@@ -58,7 +59,7 @@ class OptOps(torch.autograd.Function):
 
         if tensor_a.is_cuda:
             # transpose to make format similar to C code.
-            return ops_cuda.forward(tensor_a, tensor_b, first_occurrences, out_dim,  32, 4, 1).transpose(-1, -2)
+            return lib.forward(tensor_a, tensor_b, first_occurrences, out_dim,  32, 4, 1).transpose(-1, -2)
         else:
             return ops_cc.forward(tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim)
 
@@ -70,8 +71,8 @@ class OptOps(torch.autograd.Function):
         if grad_output.is_cuda:
 
             out_dim = ctx.out_dim
-            result = ops_cuda.backward(
-                tensor_a, tensor_b, grad_output.transpose(-1, -2), first_occurrences, out_dim, 128, 1, 1)  # convert grad_output to CUDA ordering.
+            result = lib.backward(
+                tensor_a, tensor_b, grad_output.transpose(-1, -2), first_occurrences, out_dim)  # convert grad_output to CUDA ordering.
         else:
             out_dim = ctx.out_dim
             result = ops_cc.backward(

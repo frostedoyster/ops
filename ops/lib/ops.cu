@@ -1,10 +1,9 @@
-#include <iostream>
-#include <torch/extension.h>
 #include <torch/script.h>
-#include <cuda.h>
+#include <iostream>
 
 using namespace std;
-using namespace torch;
+using namespace torch::indexing;
+using namespace torch::autograd;
 
 #define CHECK_CUDA(x) TORCH_CHECK(x.device().is_cuda(), #x " must be a CUDA tensor")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
@@ -77,10 +76,10 @@ __global__ void forward_kernel(
 torch::Tensor forward_gpu(torch::Tensor X,
                           torch::Tensor Y,
                           torch::Tensor neighbour_indices,
-                          int32_t natoms,
-                          int32_t nthreadx,
-                          int32_t nthready,
-                          int32_t nthreadz)
+                          int64_t natoms,
+                          int64_t nthreadx,
+                          int64_t nthready,
+                          int64_t nthreadz)
 {
 
     torch::Tensor output = torch::empty({natoms, Y.size(1), X.size(1)},
@@ -327,10 +326,7 @@ std::vector<torch::Tensor> backward_gpu(torch::Tensor X,
                                         torch::Tensor Y,
                                         torch::Tensor grad_in,
                                         torch::Tensor neighbour_indices,
-                                        int32_t natoms,
-                                        int32_t nthreadx,
-                                        int32_t nthready,
-                                        int32_t nthreadz)
+                                        int64_t natoms)
 {
 
     torch::Tensor gradX;
@@ -477,7 +473,7 @@ __global__ void calculate_neighbours_kernel(const torch::PackedTensorAccessor32<
     }
 }
 
-torch::Tensor calculate_neighbours_gpu(torch::Tensor sender_list, int32_t natoms, int32_t nthreadx)
+torch::Tensor calculate_neighbours_gpu(torch::Tensor sender_list, int64_t natoms, int64_t nthreadx)
 {
     torch::Tensor output_indices = torch::empty(natoms,
                                                 torch::TensorOptions()
@@ -504,9 +500,68 @@ torch::Tensor calculate_neighbours_gpu(torch::Tensor sender_list, int32_t natoms
     return output_indices;
 }
 
+/*
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     m.def("calculate_neighbours", &calculate_neighbours_gpu, "computes neighbourlist starts from sender list.");
     m.def("forward", &forward_gpu, "ops forward GPU.");
     m.def("backward", &backward_gpu, "ops backward GPU.");
+}
+*/
+
+class OuterProductAutograd : public Function<OuterProductAutograd>
+{
+public:
+    static torch::Tensor forward(
+        AutogradContext *ctx,
+        torch::Tensor X,
+        torch::Tensor Y,
+        torch::Tensor sender_list,
+        int64_t natoms)
+    {
+        torch::Tensor neighbours = calculate_neighbours_gpu(sender_list, natoms, 64);
+
+        if (X.requires_grad() || Y.requires_grad())
+        {
+            ctx->saved_data["natoms"] = natoms;
+
+            ctx->save_for_backward({X, Y, neighbours});
+        }
+
+        torch::Tensor result = forward_gpu(X, Y, neighbours, natoms, 32, 4, 1);
+
+        return result;
+    }
+
+    static variable_list backward(AutogradContext *ctx, variable_list grad_outputs)
+    {
+        auto saved_variables = ctx->get_saved_variables();
+
+        auto X = saved_variables[0];
+        auto Y = saved_variables[1];
+        auto neighbours = saved_variables[2];
+
+        int64_t natoms = ctx->saved_data["natoms"].toInt();
+
+        //cout << "grad_outputs shape: " << grad_outputs[0].sizes() <<  endl;
+
+        auto result = backward_gpu(X, Y, grad_outputs[0], neighbours, natoms);
+
+        torch::Tensor undef;
+
+        return {result[0], result[1], undef, undef};
+    }
+};
+
+torch::Tensor outer_product(torch::Tensor X, torch::Tensor Y, torch::Tensor sender_list, int64_t natoms)
+{
+    return OuterProductAutograd::apply(X, Y, sender_list, natoms);
+}
+
+TORCH_LIBRARY(ops, m)
+{
+    m.def("outer_product", &outer_product);
+    m.def("calculate_neighbours", &calculate_neighbours_gpu);
+    m.def("forward", &forward_gpu);
+    m.def("backward", &backward_gpu);
 }

@@ -2,7 +2,6 @@ import torch
 torch.manual_seed(0)
 from ops.lib.ops import ref_ops, opt_ops
 
-
 def test(dtype, device):
     print(f"Testing dtype {dtype} and device {device}")
 

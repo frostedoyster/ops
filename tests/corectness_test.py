@@ -2,7 +2,7 @@ import torch
 from ops.lib.ops import ref_ops, opt_ops
 import time
 from ops.lib import ops_cc
-from ops.lib import ops_cuda
+from ops import lib
 
 
 def benchmark(dtype, device):
@@ -26,7 +26,7 @@ def benchmark(dtype, device):
     first_occurrences_cpu = ops_cc.find_first_occurrences(
         indices.cpu(), nnodes)
 
-    first_occurrences_cuda = ops_cuda.calculate_neighbours(
+    first_occurrences_cuda = lib.calculate_neighbours(
         indices.int(), nnodes, 64)
 
     print("first occurences consistent? ", torch.allclose(
