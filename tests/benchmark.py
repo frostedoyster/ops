@@ -1,5 +1,5 @@
 import torch
-from ops import ref_ops, opt_ops
+from ops.lib.ops import ref_ops, opt_ops
 import time
 
 

@@ -1,9 +1,9 @@
 import torch
-import ops_cc
+from . import ops_cc
 
 HAS_CUDA = False
 if torch.cuda.is_available():
-    import ops_cuda
+    from . import ops_cuda
     HAS_CUDA = True
 
 

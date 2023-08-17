@@ -1,6 +1,6 @@
 import torch
 torch.manual_seed(0)
-from ops import ref_ops, opt_ops
+from ops.lib.ops import ref_ops, opt_ops
 
 
 def test(dtype, device):
