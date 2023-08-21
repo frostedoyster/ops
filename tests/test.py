@@ -19,6 +19,7 @@ def test(dtype, device):
     loss_ref.backward()
     loss_opt = torch.sum(out_opt)
     loss_opt.backward()
+
     assert torch.allclose(a_ref.grad, a_opt.grad)
     assert torch.allclose(b_ref.grad, b_opt.grad)
 

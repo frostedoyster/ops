@@ -40,9 +40,9 @@ class OptOps(torch.autograd.Function):
             raise ValueError("The two float tensors must have the same dtype")
 
         # don't think these are needed.
-        # tensor_a = tensor_a.contiguous()
-        # tensor_b = tensor_b.contiguous()
-        # scatter_indices = scatter_indices.contiguous()
+        tensor_a = tensor_a.contiguous()
+        tensor_b = tensor_b.contiguous()
+        scatter_indices = scatter_indices.contiguous()
 
         if tensor_a.is_cuda:
             first_occurrences = lib.calculate_neighbours(
@@ -68,6 +68,8 @@ class OptOps(torch.autograd.Function):
 
         tensor_a, tensor_b, scatter_indices, first_occurrences = ctx.saved_variables
 
+        grad_output = grad_output.contiguous()
+        
         if grad_output.is_cuda:
 
             out_dim = ctx.out_dim
