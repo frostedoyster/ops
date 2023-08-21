@@ -1,11 +1,4 @@
 import torch
-from . import ops_cc
-from ops import lib # forces torch.load_library
-
-HAS_CUDA = False
-
-if torch.cuda.is_available():
-    HAS_CUDA = True
 
 
 def ref_ops(tensor_a, tensor_b, scatter_indices, out_dim):
@@ -26,61 +19,23 @@ def ref_ops(tensor_a, tensor_b, scatter_indices, out_dim):
     return result
 
 
-class OptOps(torch.autograd.Function):
-    # Optimized implementation
+def opt_ops(tensor_a, tensor_b, scatter_indices, out_dim):
 
-    @staticmethod
-    def forward(ctx, tensor_a, tensor_b, scatter_indices, out_dim):
+    if tensor_a.device != tensor_b.device:
+        raise ValueError("All tensors must be on the same device")
+    if tensor_a.device != scatter_indices.device:
+        raise ValueError("All tensors must be on the same device")
+    if tensor_a.dtype != tensor_b.dtype:
+        raise ValueError("The two float tensors must have the same dtype")
+    
+    tensor_a = tensor_a.contiguous()
+    tensor_b = tensor_b.contiguous()
+    scatter_indices = scatter_indices.contiguous()
 
-        if tensor_a.device != tensor_b.device:
-            raise ValueError("All tensors must be on the same device")
-        if tensor_a.device != scatter_indices.device:
-            raise ValueError("All tensors must be on the same device")
-        if tensor_a.dtype != tensor_b.dtype:
-            raise ValueError("The two float tensors must have the same dtype")
+    if tensor_a.is_cuda:
+        result = torch.ops.ops_cu.ops_gpu(tensor_a, tensor_b, scatter_indices, out_dim)
+    else:
+        result = torch.ops.ops_cc.forward(tensor_a, tensor_b, scatter_indices, out_dim)
 
-        # don't think these are needed.
-        tensor_a = tensor_a.contiguous()
-        tensor_b = tensor_b.contiguous()
-        scatter_indices = scatter_indices.contiguous()
+    return result
 
-        if tensor_a.is_cuda:
-            first_occurrences = lib.calculate_neighbours(
-                scatter_indices.int(), out_dim, 64)
-        else:
-            first_occurrences = ops_cc.find_first_occurrences(
-                scatter_indices, out_dim)
-
-        ctx.out_dim = out_dim
-
-        if (tensor_a.requires_grad or tensor_b.requires_grad):
-            ctx.save_for_backward(tensor_a, tensor_b,
-                                  scatter_indices, first_occurrences)
-
-        if tensor_a.is_cuda:
-            # transpose to make format similar to C code.
-            return lib.forward(tensor_a, tensor_b, first_occurrences, out_dim,  32, 4, 1).transpose(-1, -2)
-        else:
-            return ops_cc.forward(tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-
-        tensor_a, tensor_b, scatter_indices, first_occurrences = ctx.saved_variables
-
-        grad_output = grad_output.contiguous()
-        
-        if grad_output.is_cuda:
-
-            out_dim = ctx.out_dim
-            result = lib.backward(
-                tensor_a, tensor_b, grad_output.transpose(-1, -2), first_occurrences, out_dim)  # convert grad_output to CUDA ordering.
-        else:
-            out_dim = ctx.out_dim
-            result = ops_cc.backward(
-                grad_output, tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim)
-
-        return result[0], result[1], None, None
-
-
-opt_ops = OptOps.apply  # simply rename the function to make it easier to call

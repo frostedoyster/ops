@@ -168,8 +168,8 @@ std::vector<torch::Tensor> backward(
 }
 
 
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("forward", &forward, "ops forward cpu");
-    m.def("backward", &backward, "ops backward cpu");
-    m.def("find_first_occurrences", &find_first_occurrences, "find first occurrences");
+TORCH_LIBRARY(ops_cpu, m) {
+    m.def("forward", &forward);
+    m.def("backward", &backward);
+    m.def("find_first_occurrences", &find_first_occurrences);
 }

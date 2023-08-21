@@ -558,7 +558,7 @@ torch::Tensor outer_product(torch::Tensor X, torch::Tensor Y, torch::Tensor send
     return OuterProductAutograd::apply(X, Y, sender_list, natoms);
 }
 
-TORCH_LIBRARY(ops, m)
+TORCH_LIBRARY(ops_gpu, m)
 {
     m.def("outer_product", &outer_product);
     m.def("calculate_neighbours", &calculate_neighbours_gpu);

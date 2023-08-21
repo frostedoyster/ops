@@ -1,24 +1,20 @@
-from setuptools import setup, find_packages
-from torch.utils.cpp_extension import CppExtension, CUDAExtension, BuildExtension
-from torch.utils.cpp_extension import CUDA_HOME
+from setuptools import setup#, find_packages
+from torch.utils.cpp_extension import CppExtension, CUDAExtension, BuildExtension#,CUDA_HOME
 import os
 import re
 from torch import cuda
 
 
-'''
-Hack to remove lib.*.so from the output .so files.
-'''
+# Hack to remove lib.*.so from the output .so files.
 from distutils.command.install_lib import install_lib as _install_lib
-
 
 def batch_rename(src, dst, src_dir_fd=None, dst_dir_fd=None):
     '''Same as os.rename, but returns the renaming result.'''
     os.rename(src, dst,
               src_dir_fd=src_dir_fd,
-              dst_dir_fd=dst_dir_fd)
+              dst_dir_fd=dst_dir_fd
+    )
     return dst
-
 
 class _CommandInstallCythonized(_install_lib):
     def __init__(self, *args, **kwargs):
@@ -31,8 +27,9 @@ class _CommandInstallCythonized(_install_lib):
         # for each file, match string between
         # second last and last dot and trim it
         matcher = re.compile('\.([^.]+)\.so$')
-        return [batch_rename(file, re.sub(matcher, '.so', file))
-                for file in outfiles]
+        return [
+            batch_rename(file, re.sub(matcher, '.so', file)) for file in outfiles
+        ]
 
 
 ext_modules = []
@@ -60,6 +57,8 @@ setup(
     classifiers=[],
     ext_package='',
     ext_modules=ext_modules,
-    cmdclass={'build_ext': BuildExtension,
-              'install_lib': _CommandInstallCythonized
-              })
+    cmdclass={
+        'build_ext': BuildExtension,
+        'install_lib': _CommandInstallCythonized
+    }
+)
