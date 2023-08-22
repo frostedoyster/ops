@@ -22,20 +22,22 @@ template <typename scalar_t>
 __global__ void forward_kernel(
     const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> X,
     const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> Y,
-    const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> indices,
+    const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> receiver_list,
+    const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> neighbour_indices,
     torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> output)
 {
-
-    int32_t edge_start = indices[blockIdx.x];
+    int32_t edge_start = neighbour_indices[blockIdx.x];
     int32_t edge_end = 0;
 
-    if (blockIdx.x == indices.size(0) - 1) // nnodes -1
+    int32_t node_index = receiver_list[edge_start]; // get the idnex of the node we need to sum into.
+
+    if (blockIdx.x == neighbour_indices.size(0) - 1) // nnodes -1
     {
         edge_end = Y.size(0); // nedges -1
     }
     else
     {
-        edge_end = indices[blockIdx.x + 1];
+        edge_end = neighbour_indices[blockIdx.x + 1];
     }
 
     // check if this node has neighbours
@@ -69,12 +71,13 @@ __global__ void forward_kernel(
         }
 
         if (valid)
-            output[blockIdx.x][m][feat_start + threadIdx.x] = tmp_output;
+            output[node_index][m][feat_start + threadIdx.x] = tmp_output;
     }
 }
 
 torch::Tensor forward_gpu(torch::Tensor X,
                           torch::Tensor Y,
+                          torch::Tensor receiver_list,
                           torch::Tensor neighbour_indices,
                           int64_t natoms,
                           int64_t nthreadx,
@@ -103,6 +106,7 @@ torch::Tensor forward_gpu(torch::Tensor X,
                     forward_kernel<scalar_t><<<block_dim, grid_dim, total_buff_size>>>(
                         X.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                         Y.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                        receiver_list.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
                         neighbour_indices.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
                         output.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>()); }));
 
@@ -119,7 +123,8 @@ template <typename scalar_t>
 __global__ void backward_dX_kernel(
     const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> Y,
     const torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> grad_in, // [nnodes, m, feat]
-    const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> indices,
+    const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> receiver_list,
+    const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> neighbour_indices,
     torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> grad_X)
 {
 
@@ -128,16 +133,18 @@ __global__ void backward_dX_kernel(
     scalar_t *buffer_grad_in = reinterpret_cast<scalar_t *>(buffer + offset);
     offset += FEATS_PER_BLOCK_Y * Y.size(1) * sizeof(scalar_t);
 
-    int32_t edge_start = indices[blockIdx.x];
+    int32_t edge_start = neighbour_indices[blockIdx.x];
     int32_t edge_end = 0;
 
-    if (blockIdx.x == indices.size(0) - 1) // nnodes -1
+    int32_t node_index = receiver_list[edge_start];
+
+    if (blockIdx.x == neighbour_indices.size(0) - 1) // nnodes -1
     {
         edge_end = Y.size(0); // nedges -1
     }
     else
     {
-        edge_end = indices[blockIdx.x + 1];
+        edge_end = neighbour_indices[blockIdx.x + 1];
     }
     int32_t nedges = edge_end - edge_start;
 
@@ -162,7 +169,7 @@ __global__ void backward_dX_kernel(
 
             if (feat_start + tidx < grad_in.size(2))
             {
-                val = grad_in[blockIdx.x][m][feat_start + tidx];
+                val = grad_in[node_index][m][feat_start + tidx];
             }
 
             buffer_grad_in[m * FEATS_PER_BLOCK_Y + tidx] = val;
@@ -221,7 +228,8 @@ __global__ void backward_dX_kernel(
 template <typename scalar_t>
 __global__ void backward_dY_kernel(const torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> X,
                                    const torch::PackedTensorAccessor32<scalar_t, 3, torch::RestrictPtrTraits> grad_in, // [nnodes, m, feat]
-                                   const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> indices,
+                                   const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> receiver_list,
+                                   const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> neighbour_indices,
                                    torch::PackedTensorAccessor32<scalar_t, 2, torch::RestrictPtrTraits> grad_Y)
 {
 
@@ -230,16 +238,18 @@ __global__ void backward_dY_kernel(const torch::PackedTensorAccessor32<scalar_t,
     scalar_t *buffer_grad_in = reinterpret_cast<scalar_t *>(buffer + offset);
     offset += X.size(1) * M_PER_BLOCK_X * sizeof(scalar_t); // e.g 128 x 4
 
-    int32_t edge_start = indices[blockIdx.x];
+    int32_t edge_start = neighbour_indices[blockIdx.x];
     int32_t edge_end = 0;
 
-    if (blockIdx.x == indices.size(0) - 1) // nnodes -1
+    int32_t node_index = receiver_list[edge_start];
+
+    if (blockIdx.x == neighbour_indices.size(0) - 1) // nnodes -1
     {
         edge_end = X.size(0); // nedges -1
     }
     else
     {
-        edge_end = indices[blockIdx.x + 1];
+        edge_end = neighbour_indices[blockIdx.x + 1];
     }
     int32_t nedges = edge_end - edge_start;
 
@@ -265,7 +275,7 @@ __global__ void backward_dY_kernel(const torch::PackedTensorAccessor32<scalar_t,
 
             if (global_m < grad_in.size(1))
             {
-                val = grad_in[blockIdx.x][global_m][feat];
+                val = grad_in[node_index][global_m][feat];
             }
 
             buffer_grad_in[local_m * X.size(1) + feat] = val;
@@ -325,6 +335,7 @@ __global__ void backward_dY_kernel(const torch::PackedTensorAccessor32<scalar_t,
 std::vector<torch::Tensor> backward_gpu(torch::Tensor X,
                                         torch::Tensor Y,
                                         torch::Tensor grad_in,
+                                        torch::Tensor receiver_list,
                                         torch::Tensor neighbour_indices,
                                         int64_t natoms)
 {
@@ -377,6 +388,7 @@ std::vector<torch::Tensor> backward_gpu(torch::Tensor X,
                 backward_dX_kernel<scalar_t><<<block_dim_x, grid_dim_x, buff_size_x>>>(
                     Y.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                     grad_in.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>(),
+                    receiver_list.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
                     neighbour_indices.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
                     gradX.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>());
             }
@@ -389,6 +401,7 @@ std::vector<torch::Tensor> backward_gpu(torch::Tensor X,
                 backward_dY_kernel<scalar_t><<<block_dim_y, grid_dim_y, buff_size_y>>>(
                     X.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
                     grad_in.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>(),
+                    receiver_list.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
                     neighbour_indices.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
                     gradY.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>());
             } }));
@@ -516,19 +529,19 @@ public:
         AutogradContext *ctx,
         torch::Tensor X,
         torch::Tensor Y,
-        torch::Tensor sender_list,
+        torch::Tensor receiver_list,
         int64_t natoms)
     {
-        torch::Tensor neighbours = calculate_neighbours_gpu(sender_list, natoms, 64);
+        torch::Tensor neighbours = calculate_neighbours_gpu(receiver_list, natoms, 64);
 
         if (X.requires_grad() || Y.requires_grad())
         {
             ctx->saved_data["natoms"] = natoms;
 
-            ctx->save_for_backward({X, Y, neighbours});
+            ctx->save_for_backward({X, Y, receiver_list, neighbours});
         }
 
-        torch::Tensor result = forward_gpu(X, Y, neighbours, natoms, 32, 4, 1);
+        torch::Tensor result = forward_gpu(X, Y, receiver_list, neighbours, natoms, 32, 4, 1);
 
         return result;
     }
@@ -539,13 +552,14 @@ public:
 
         auto X = saved_variables[0];
         auto Y = saved_variables[1];
-        auto neighbours = saved_variables[2];
+        auto receiver_list = saved_variables[2];
+        auto neighbours = saved_variables[3];
 
         int64_t natoms = ctx->saved_data["natoms"].toInt();
 
-        //cout << "grad_outputs shape: " << grad_outputs[0].sizes() <<  endl;
+        // cout << "grad_outputs shape: " << grad_outputs[0].sizes() <<  endl;
 
-        auto result = backward_gpu(X, Y, grad_outputs[0].contiguous(), neighbours, natoms);
+        auto result = backward_gpu(X, Y, grad_outputs[0], receiver_list, neighbours, natoms);
 
         torch::Tensor undef;
 
@@ -561,4 +575,7 @@ torch::Tensor ops(torch::Tensor X, torch::Tensor Y, torch::Tensor sender_list, i
 TORCH_LIBRARY(ops_cu, m)
 {
     m.def("ops", &ops);
+    m.def("calculate_neighbours", &calculate_neighbours_gpu);
+    m.def("forward", &forward_gpu);
+    m.def("backward", &backward_gpu);
 }

@@ -15,27 +15,25 @@ if torch.cuda.is_available():
     torch.ops.load_library(_HERE + '/ops_cuda.so')
 
 '''
-    differenciable outer product
-'''
-
-def outer_product(X, Y, sender_list, nnodes):
-    return torch.ops.ops.outer_product(X, Y, sender_list, nnodes)
-
-'''
-    Non-differenciable - for testing only.
+    direct access to cuda functions, for testing only.
 '''
 
 
-def forward(X, Y, sender_list, nnodes, nthreadx=32, nthready=4, nthreadz=1):
-    return torch.ops.ops.forward(X, Y, sender_list, nnodes, nthreadx, nthready, nthreadz)
+def forward(X, Y, scatter_indices, neighbours, nnodes, nthreadx=32, nthready=4, nthreadz=1):
+    return torch.ops.ops_cu.forward(X, Y, scatter_indices, neighbours, nnodes, nthreadx, nthready, nthreadz)
 
 
-def backward(X, Y, grad_in, neighbours, nnodes):
-    return torch.ops.ops.backward(X, Y, grad_in, neighbours, nnodes)
+def backward(X, Y, grad_in, scatter_indices, neighbours, nnodes):
+    return torch.ops.ops_cu.backward(X, Y, grad_in, scatter_indices, neighbours, nnodes)
 
 
-def calculate_neighbours(sender_list, nnodes, nthreadx=64):
-    return torch.ops.ops.calculate_neighbours(sender_list, nnodes, nthreadx)
+def calculate_neighbours(scatter_indices, nnodes, nthreadx=64):
+    return torch.ops.ops_cu.calculate_neighbours(scatter_indices, nnodes, nthreadx)
+
+
+'''
+    fin.
+'''
 
 
 def ref_ops(tensor_a, tensor_b, scatter_indices, out_dim):
@@ -64,15 +62,17 @@ def opt_ops(tensor_a, tensor_b, scatter_indices, out_dim):
         raise ValueError("All tensors must be on the same device")
     if tensor_a.dtype != tensor_b.dtype:
         raise ValueError("The two float tensors must have the same dtype")
-    
-    tensor_a = tensor_a.contiguous()
-    tensor_b = tensor_b.contiguous()
-    scatter_indices = scatter_indices.contiguous()
+
+    if (not tensor_a.is_cuda):  # not needed on the GPU as it's by-construction contiguous
+        tensor_a = tensor_a.contiguous()
+        tensor_b = tensor_b.contiguous()
+        scatter_indices = scatter_indices.contiguous()
 
     if tensor_a.is_cuda:
-        result = torch.ops.ops_cu.ops(tensor_a, tensor_b, scatter_indices.to(torch.int32), out_dim).swapaxes(1, 2)
+        result = torch.ops.ops_cu.ops(tensor_a, tensor_b, scatter_indices.to(
+            torch.int32), out_dim).swapaxes(1, 2)
     else:
-        result = torch.ops.ops_cc.ops(tensor_a, tensor_b, scatter_indices, out_dim)
+        result = torch.ops.ops_cc.ops(
+            tensor_a, tensor_b, scatter_indices, out_dim)
 
     return result
-

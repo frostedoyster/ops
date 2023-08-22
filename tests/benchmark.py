@@ -57,8 +57,8 @@ def benchmark(dtype, device):
 
 
 if __name__ == "__main__":
-    # benchmark(torch.float32, "cpu")
-    # benchmark(torch.float64, "cpu")
+    benchmark(torch.float32, "cpu")
+    benchmark(torch.float64, "cpu")
     if torch.cuda.is_available():
         benchmark(torch.float32, "cuda")
         benchmark(torch.float64, "cuda")

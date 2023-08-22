@@ -1,15 +1,15 @@
 import torch
 from ops.lib.ops import ref_ops, opt_ops
 import time
-from ops import lib # forces torch.load_library
+from ops.lib import ops # forces torch.load_library
 
 
 def benchmark(dtype, device):
 
-    nedges = 30000
+    nedges = 60000
     nnodes = 1000
-    nfeatures = 96
-    nl = 16
+    nfeatures = 32
+    nl = 5
 
     print(f"--DTYPE: {dtype}")
     print(f"Benchmarking dtype {dtype} and device {device}")
@@ -25,21 +25,21 @@ def benchmark(dtype, device):
 
     start = time.time()
     for _ in range(1000):
-        neighbour_cuda = lib.calculate_neighbours(
+        neighbour_cuda = ops.calculate_neighbours(
             indices_cuda, nnodes, 64)
     finish = time.time()
     print(f"The indices for CUDA implementation took {finish-start:.3f} seconds")
 
-    X = a.cuda()
-    Y = b.cuda()
+    X = a.clone().detach().cuda().requires_grad_(True)
+    Y = b.clone().detach().cuda().cuda().requires_grad_(True)
 
     # warmup
     for _ in range(1000):
-        output_cuda = lib.forward(X, Y, neighbour_cuda, nnodes,  32, 4, 1)
+        output_cuda = ops.forward(X, Y, indices_cuda, neighbour_cuda, nnodes,  32, 4, 1)
 
     start = time.time()
     for _ in range(1000):
-        output_cuda = lib.forward(X, Y, neighbour_cuda, nnodes,  32, 4, 1)
+        output_cuda = ops.forward(X, Y, indices_cuda, neighbour_cuda, nnodes,  32, 4, 1)
     torch.cuda.synchronize()
     finish = time.time()
     print(f"The CUDA implementation forward (direct call) took {finish-start:.3f} seconds")
@@ -48,8 +48,8 @@ def benchmark(dtype, device):
 
     start = time.time()
     for _ in range(1000):
-        dX, dY = lib.backward(
-            X, Y, grad_in, neighbour_cuda, nnodes)
+        dX, dY = ops.backward(
+            X, Y, grad_in, indices_cuda, neighbour_cuda, nnodes)
     torch.cuda.synchronize()
     finish = time.time()
     print(
@@ -60,26 +60,11 @@ def benchmark(dtype, device):
         v = opt_ops(X, Y, indices_cuda, nnodes)
     torch.cuda.synchronize()
     finish = time.time()
-    print(f"The CUDA implementation forward (python autograd) took {finish-start:.3f} seconds")
-
-    start = time.time()
-    for _ in range(1000):
-        loss = torch.sum(opt_ops(X, Y, indices_cuda, nnodes))
-        loss.backward()
-    torch.cuda.synchronize()
-    finish = time.time()
-    print(f"The CUDA implementation backward (python autograd) took {finish-start:.3f} seconds")
-
-    start = time.time()
-    for _ in range(1000):
-        v = lib.outer_product(X, Y, indices_cuda, nnodes)
-    torch.cuda.synchronize()
-    finish = time.time()
     print(f"The CUDA implementation forward (C++ autograd) took {finish-start:.3f} seconds")
 
     start = time.time()
     for _ in range(1000):
-        loss = torch.sum(lib.outer_product(X, Y, indices_cuda, nnodes))
+        loss = torch.sum(opt_ops(X, Y, indices_cuda, nnodes))
         loss.backward()
     torch.cuda.synchronize()
     finish = time.time()

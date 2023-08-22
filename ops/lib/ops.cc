@@ -185,4 +185,6 @@ torch::Tensor ops(torch::Tensor X, torch::Tensor Y, torch::Tensor sender_list, l
 
 TORCH_LIBRARY(ops_cc, m) {
     m.def("ops", &ops);
+    m.def("find_first_occurrences", &find_first_occurrences);
 }
+
