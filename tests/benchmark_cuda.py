@@ -35,11 +35,11 @@ def benchmark(dtype, device):
 
     # warmup
     for _ in range(1000):
-        output_cuda = ops.forward(X, Y, indices_cuda, neighbour_cuda, nnodes,  32, 4, 1)
+        output_cuda = ops.forward_test(X, Y, indices_cuda, neighbour_cuda, nnodes,  32, 4, 1)
 
     start = time.time()
     for _ in range(1000):
-        output_cuda = ops.forward(X, Y, indices_cuda, neighbour_cuda, nnodes,  32, 4, 1)
+        output_cuda = ops.forward_test(X, Y, indices_cuda, neighbour_cuda, nnodes,  32, 4, 1)
     torch.cuda.synchronize()
     finish = time.time()
     print(f"The CUDA implementation forward (direct call) took {finish-start:.3f} seconds")
@@ -48,7 +48,7 @@ def benchmark(dtype, device):
 
     start = time.time()
     for _ in range(1000):
-        dX, dY = ops.backward(
+        dX, dY = ops.backward_test(
             X, Y, grad_in, indices_cuda, neighbour_cuda, nnodes)
     torch.cuda.synchronize()
     finish = time.time()

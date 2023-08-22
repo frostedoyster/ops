@@ -19,11 +19,11 @@ if torch.cuda.is_available():
 '''
 
 
-def forward(X, Y, scatter_indices, neighbours, nnodes, nthreadx=32, nthready=4, nthreadz=1):
+def forward_test(X, Y, scatter_indices, neighbours, nnodes, nthreadx=32, nthready=4, nthreadz=1):
     return torch.ops.ops_cu.forward(X, Y, scatter_indices, neighbours, nnodes, nthreadx, nthready, nthreadz)
 
 
-def backward(X, Y, grad_in, scatter_indices, neighbours, nnodes):
+def backward_test(X, Y, grad_in, scatter_indices, neighbours, nnodes):
     return torch.ops.ops_cu.backward(X, Y, grad_in, scatter_indices, neighbours, nnodes)
 
 
