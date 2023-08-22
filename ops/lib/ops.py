@@ -1,3 +1,5 @@
+import os
+import sysconfig
 import torch
 
 
@@ -19,6 +21,13 @@ def ref_ops(tensor_a, tensor_b, scatter_indices, out_dim):
     return result
 
 
+_HERE = os.path.realpath(os.path.dirname(__file__))
+EXT_SUFFIX = sysconfig.get_config_var('EXT_SUFFIX')
+
+torch.ops.load_library(_HERE + '/ops_cc.so')
+if torch.cuda.is_available():
+    torch.ops.load_library(_HERE + '/ops_cuda.so')
+
 def opt_ops(tensor_a, tensor_b, scatter_indices, out_dim):
 
     if tensor_a.device != tensor_b.device:
@@ -33,9 +42,9 @@ def opt_ops(tensor_a, tensor_b, scatter_indices, out_dim):
     scatter_indices = scatter_indices.contiguous()
 
     if tensor_a.is_cuda:
-        result = torch.ops.ops_cu.ops_gpu(tensor_a, tensor_b, scatter_indices, out_dim)
+        result = torch.ops.ops_cu.ops(tensor_a, tensor_b, scatter_indices.to(torch.int32), out_dim).swapaxes(1, 2)
     else:
-        result = torch.ops.ops_cc.forward(tensor_a, tensor_b, scatter_indices, out_dim)
+        result = torch.ops.ops_cc.ops(tensor_a, tensor_b, scatter_indices, out_dim)
 
     return result
 

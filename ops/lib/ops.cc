@@ -127,49 +127,62 @@ std::vector<torch::Tensor> backward_t(
         }
     }
 
-    return {grad_a, grad_b};
+    return {grad_a, grad_b, torch::Tensor(), torch::Tensor()};
 }
 
 
-torch::Tensor forward(
-    torch::Tensor tensor_a,
-    torch::Tensor tensor_b,
-    torch::Tensor scatter_indices,
-    torch::Tensor first_occurrences,
-    long out_dim
-) {
-    // Dispatch type by hand
-    if (tensor_a.dtype() == c10::kDouble) {
-        return forward_t<double>(tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim);
-    } else if (tensor_a.dtype() == c10::kFloat) {
-        return forward_t<float>(tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim);
-    } else {
-        throw std::runtime_error("Unsupported dtype");
+class Ops : public torch::autograd::Function<Ops> {
+
+public:
+
+    static torch::Tensor forward(
+        torch::autograd::AutogradContext *ctx,
+        torch::Tensor tensor_a,
+        torch::Tensor tensor_b,
+        torch::Tensor scatter_indices,
+        long out_dim
+    ) {
+        torch::Tensor first_occurrences = find_first_occurrences(scatter_indices, out_dim);
+        ctx->saved_data["out_dim"] = out_dim;
+        ctx->saved_data["first_occurrences"] = first_occurrences;
+        ctx->save_for_backward({tensor_a, tensor_b, scatter_indices});
+
+        // Dispatch type by hand
+        if (tensor_a.dtype() == c10::kDouble) {
+            return forward_t<double>(tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim);
+        } else if (tensor_a.dtype() == c10::kFloat) {
+            return forward_t<float>(tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim);
+        } else {
+            throw std::runtime_error("Unsupported dtype");
+        }
     }
-}
 
+    static std::vector<torch::Tensor> backward(torch::autograd::AutogradContext *ctx, std::vector<torch::Tensor> grad_outputs) {
 
-std::vector<torch::Tensor> backward(
-    torch::Tensor grad_output,
-    torch::Tensor tensor_a,
-    torch::Tensor tensor_b,
-    torch::Tensor scatter_indices,
-    torch::Tensor first_occurrences,
-    long out_dim
-) {
-    // Dispatch type by hand
-    if (tensor_a.dtype() == c10::kDouble) {
-        return backward_t<double>(grad_output, tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim);
-    } else if (tensor_a.dtype() == c10::kFloat) {
-        return backward_t<float>(grad_output, tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim);
-    } else {
-        throw std::runtime_error("Unsupported dtype");
+        long out_dim = ctx->saved_data["out_dim"].toInt();
+        torch::Tensor first_occurrences = ctx->saved_data["first_occurrences"].toTensor();
+        std::vector<torch::Tensor> saved_variables = ctx->get_saved_variables();
+        torch::Tensor tensor_a = saved_variables[0];
+        torch::Tensor tensor_b = saved_variables[1];
+        torch::Tensor scatter_indices = saved_variables[2];
+        
+        // Dispatch type by hand
+        if (tensor_a.dtype() == c10::kDouble) {
+            return backward_t<double>(grad_outputs[0].contiguous(), tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim);
+        } else if (tensor_a.dtype() == c10::kFloat) {
+            return backward_t<float>(grad_outputs[0].contiguous(), tensor_a, tensor_b, scatter_indices, first_occurrences, out_dim);
+        } else {
+            throw std::runtime_error("Unsupported dtype");
+        }
     }
+};
+
+
+torch::Tensor ops(torch::Tensor X, torch::Tensor Y, torch::Tensor sender_list, long natoms) {
+    return Ops::apply(X, Y, sender_list, natoms);
 }
 
 
-TORCH_LIBRARY(ops_cpu, m) {
-    m.def("forward", &forward);
-    m.def("backward", &backward);
-    m.def("find_first_occurrences", &find_first_occurrences);
+TORCH_LIBRARY(ops_cc, m) {
+    m.def("ops", &ops);
 }

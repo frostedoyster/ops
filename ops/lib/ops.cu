@@ -545,7 +545,7 @@ public:
 
         //cout << "grad_outputs shape: " << grad_outputs[0].sizes() <<  endl;
 
-        auto result = backward_gpu(X, Y, grad_outputs[0], neighbours, natoms);
+        auto result = backward_gpu(X, Y, grad_outputs[0].contiguous(), neighbours, natoms);
 
         torch::Tensor undef;
 
@@ -553,15 +553,12 @@ public:
     }
 };
 
-torch::Tensor outer_product(torch::Tensor X, torch::Tensor Y, torch::Tensor sender_list, int64_t natoms)
+torch::Tensor ops(torch::Tensor X, torch::Tensor Y, torch::Tensor sender_list, int64_t natoms)
 {
     return OuterProductAutograd::apply(X, Y, sender_list, natoms);
 }
 
-TORCH_LIBRARY(ops_gpu, m)
+TORCH_LIBRARY(ops_cu, m)
 {
-    m.def("outer_product", &outer_product);
-    m.def("calculate_neighbours", &calculate_neighbours_gpu);
-    m.def("forward", &forward_gpu);
-    m.def("backward", &backward_gpu);
+    m.def("ops", &ops);
 }

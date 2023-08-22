@@ -1,6 +1,6 @@
 import torch
 torch.manual_seed(0)
-from ops.lib.ops import ref_ops, opt_ops
+from ops.lib import ref_ops, opt_ops
 
 def test(dtype, device):
     print(f"Testing dtype {dtype} and device {device}")
@@ -29,6 +29,6 @@ def test(dtype, device):
 if __name__ == "__main__":
     test(torch.float32, "cpu")
     test(torch.float64, "cpu")
-    #if torch.cuda.is_available():
-    #    test(torch.float32, "cuda")
-    #    test(torch.float64, "cuda")
+    if torch.cuda.is_available():
+        test(torch.float32, "cuda")
+        test(torch.float64, "cuda")
