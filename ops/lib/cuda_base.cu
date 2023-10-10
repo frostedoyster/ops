@@ -58,7 +58,9 @@ __global__ void forward_kernel(
     const int64_t n_y;
     const int64_t l_y;
     const restrict int64_t* receiver_list,
+    const int64_t num_receivers,
     const restrict int64_t* neighbour_indices,
+    const int64_t num_indices;
     restrict scalar_t* output,
     const int64_t n_output,
     const int64_t l1_output,
@@ -69,7 +71,7 @@ __global__ void forward_kernel(
 
     int32_t node_index = receiver_list[edge_start]; // get the idnex of the node we need to sum into.
 
-    if (blockIdx.x == neighbour_indices.size(0) - 1) // nnodes -1
+    if (blockIdx.x == num_indices - 1) // nnodes -1
     {
         edge_end = n_y - 1; // nedges -1
     }
@@ -113,7 +115,7 @@ __global__ void forward_kernel(
         if (valid)
         {
             // output[node_index][m][feat_start + threadIdx.x] = tmp_output;
-            output[(node_index-1)*(l1_output*l2_output) + (m-1)(l1_output) + feat_start + threadIdx.x] = tmp_output;
+            output[(node_index-1)*(l1_output*l2_output) + (m-1)*(l1_output) + feat_start + threadIdx.x] = tmp_output;
         }
     }
 }
