@@ -34,7 +34,7 @@ class _CommandInstallCythonized(_install_lib):
 
 ext_modules = []
 
-ext_module_cpp = CppExtension(
+ext_module_cpp = CUDAExtension(
     'ops.lib.ops_cc',
     ['ops/lib/ops.cc'],
     extra_compile_args=['-fopenmp', '-Wall', '-Werror']
