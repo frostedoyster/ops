@@ -259,7 +259,7 @@ __global__ void backward_dY_kernel(
     extern __shared__ char buffer[];
     size_t offset = 0;
     scalar_t *buffer_grad_in = reinterpret_cast<scalar_t *>(buffer + offset);
-    offset += X.size(1) * M_PER_BLOCK_X * sizeof(scalar_t); // e.g 128 x 4
+    offset += l_x * M_PER_BLOCK_X * sizeof(scalar_t); // e.g 128 x 4
 
     int32_t edge_start = neighbour_indices[blockIdx.x];
     int32_t edge_end = 0;
@@ -268,7 +268,7 @@ __global__ void backward_dY_kernel(
 
     if (blockIdx.x == neighbour_indices.size(0) - 1) // nnodes -1
     {
-        edge_end = X.size(0); // nedges -1
+        edge_end = n_x; // nedges -1
     }
     else
     {
@@ -285,7 +285,7 @@ __global__ void backward_dY_kernel(
     int32_t m_start = blockIdx.y * M_PER_BLOCK_X; // each block handles M_PER_BLOCK_X m indices
 
     int niter_m = find_integer_divisor(M_PER_BLOCK_X, blockDim.y);
-    int niter_x = find_integer_divisor(X.size(1), blockDim.x);
+    int niter_x = find_integer_divisor(l_x, blockDim.x);
 
     for (int m_idx = 0; m_idx < niter_m; m_idx++)
     {
@@ -296,12 +296,13 @@ __global__ void backward_dY_kernel(
         {
             scalar_t val = 0.0;
 
-            if (global_m < grad_in.size(1))
+            if (global_m < l1_grad_in)
             {
-                val = grad_in[node_index][global_m][feat];
+                // val = grad_in[node_index][global_m][feat];
+                val = grad_in[node_index*l1_grad_in*l2_grad_in + global_m*l1_grad_in + feat];
             }
 
-            buffer_grad_in[local_m * X.size(1) + feat] = val;
+            buffer_grad_in[local_m * l_x + feat] = val;
         }
     }
 
@@ -325,16 +326,17 @@ __global__ void backward_dY_kernel(
 
                 scalar_t tmp_grad_in = 0.0;
 
-                if (global_m < grad_in.size(1) && feat < X.size(1))
+                if (global_m < l1_grad_in && feat < l_x)
                 {
-                    tmp_grad_in = buffer_grad_in[local_m * X.size(1) + feat];
+                    tmp_grad_in = buffer_grad_in[local_m * l_x + feat];
                 }
 
                 scalar_t x = 0.0;
 
-                if (feat < X.size(1))
+                if (feat < l_x)
                 {
-                    x = X[i][feat];
+                    // x = X[i][feat];
+                    x = X[i*n_x + feat];
                 }
 
                 scalar_t tmp_grad = tmp_grad_in * x;
@@ -347,9 +349,10 @@ __global__ void backward_dY_kernel(
                 tmp_output += tmp_grad;
             }
 
-            if (threadIdx.x == 0 && global_m < grad_in.size(1))
+            if (threadIdx.x == 0 && global_m < l1_grad_in)
             {
-                grad_Y[i][global_m] = tmp_output;
+                // grad_Y[i][global_m] = tmp_output;
+                grad_Y[i*n_grad_in + global_m] = tmp_output;
             }
         }
     }
@@ -366,8 +369,9 @@ the function loads NEIGHBOUR_NEDGES_PER_BLOCK + 1 elements into shared memory, a
 */
 
 __global__ void calculate_neighbours_kernel(
-    const torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> sender_list,
-    torch::PackedTensorAccessor32<int32_t, 1, torch::RestrictPtrTraits> edge_indices)
+    const int64_t* restrict sender_list,
+    const int64_t num_senders,
+    int64_t* restrict edge_indices)
 {
     extern __shared__ char buffer[];
     size_t offset = 0;
@@ -375,7 +379,7 @@ __global__ void calculate_neighbours_kernel(
 
     int32_t block_start = blockIdx.x * NEIGHBOUR_NEDGES_PER_BLOCK;
 
-    int32_t nedges = sender_list.size(0);
+    int32_t nedges = num_senders;
 
     // load all elements of senderlist needed by block into shared memory
     for (int32_t i = threadIdx.x; i < NEIGHBOUR_NEDGES_PER_BLOCK + 1; i += blockDim.x)
