@@ -13,7 +13,42 @@ using namespace torch::autograd;
     CHECK_CUDA(x);     \
     CHECK_CONTIGUOUS(x)
 
+#define _OPS_INTERNAL_IMPLEMENTATION
+#define CUDA_DEVICE_PREFIX __device__
+
 #define FULL_MASK 0xffffffff
+
+#define CUDA_ERROR_CHECK(fun)                                                                        \
+    do                                                                                               \
+    {                                                                                                \
+        cudaError_t err = fun;                                                                       \
+        if (err != cudaSuccess)                                                                      \
+        {                                                                                            \
+            fprintf(stderr, "Cuda error %d %s:: %s\n", __LINE__, __func__, cudaGetErrorString(err)); \
+            exit(EXIT_FAILURE);                                                                      \
+        }                                                                                            \
+    } while (0);
+
+#define CUDA_DEVICE_CHECK(device, pointer)                                                                                                              \
+    cudaPointerAttributes attributes;                                                                                                                   \
+    CUDA_ERROR_CHECK(cudaPointerGetAttributes(&attributes, pointer));                                                                                   \
+    if (attributes.devicePointer == NULL || device != attributes.device)                                                                                \
+    {                                                                                                                                                   \
+        if (attributes.devicePointer == NULL)                                                                                                           \
+        {                                                                                                                                               \
+            printf("CUDA error %d %s :: %s\n", __LINE__, __func__, "pointer is not resident on a GPU");                                                 \
+        }                                                                                                                                               \
+        else if (device != attributes.device)                                                                                                           \
+        {                                                                                                                                               \
+            printf("CUDA error %d %s :: pointer not resident on correct GPU (this: %d, pointer: %d)\n", __LINE__, __func__, device, attributes.device); \
+        }                                                                                                                                               \
+        exit(EXIT_FAILURE);                                                                                                                             \
+    }
+
+int32_t find_integer_divisor(int32_t x, int32_t bdim)
+{
+    return (x + bdim - 1) / bdim;
+}
 
 torch::Tensor forward_gpu(torch::Tensor X,
                           torch::Tensor Y,
@@ -41,14 +76,44 @@ torch::Tensor forward_gpu(torch::Tensor X,
                                   {
                     size_t total_buff_size = 0;
 
-                    //total_buff_size += nthreadx * Y.size(1) * sizeof(scalar_t);
+                    total_buff_size += nthreadx * Y.size(1) * sizeof(scalar_t);
+
+                    // forward_kernel<scalar_t><<<block_dim, grid_dim, total_buff_size>>>(
+                    //     X.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                    //     Y.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
+                    //     receiver_list.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
+                    //     neighbour_indices.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
+                    //     output.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>()); }));
+
+                    int64_t n_x = X.size(0);
+                    int64_t l_x = X.size(1);
+                    
+                    int64_t n_y = Y.size(0);
+                    int64_t l_y = Y.size(1);
+
+                    int64_t num_receivers = receiver_list.size(0);
+                    int64_t num_indices = neighbour_indices.size(0);
+
+                    int64_t n_output = n_atoms;
+                    int64_t l1_output = l_y;
+                    int64_t l2_output = l_x;
 
                     forward_kernel<scalar_t><<<block_dim, grid_dim, total_buff_size>>>(
-                        X.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-                        Y.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-                        receiver_list.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
-                        neighbour_indices.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
-                        output.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>()); }));
+                        X.data_ptr<scalar_t>(),
+                        n_x,
+                        l_x,
+                        Y.data_ptr<scalar_t>(),
+                        n_y,
+                        l_y,
+                        receiver_list.data_ptr<int64_t>(),
+                        num_receivers,
+                        neighbour_indices.data_ptr<int64_t>(),
+                        num_indices,
+                        output.data_ptr<scalar_t>(),
+                        n_output,
+                        l1_output,
+                        l2_output); 
+                    }));
 
     cudaDeviceSynchronize();
 

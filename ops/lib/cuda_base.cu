@@ -6,39 +6,6 @@
 
 #include "cuda_base.cuh"
 
-#define _OPS_INTERNAL_IMPLEMENTATION
-#define CUDA_DEVICE_PREFIX __device__
-#include "ops.hpp"
-
-#define FULL_MASK 0xffffffff
-
-#define CUDA_ERROR_CHECK(fun)                                                                        \
-    do                                                                                               \
-    {                                                                                                \
-        cudaError_t err = fun;                                                                       \
-        if (err != cudaSuccess)                                                                      \
-        {                                                                                            \
-            fprintf(stderr, "Cuda error %d %s:: %s\n", __LINE__, __func__, cudaGetErrorString(err)); \
-            exit(EXIT_FAILURE);                                                                      \
-        }                                                                                            \
-    } while (0);
-
-#define CUDA_DEVICE_CHECK(device, pointer)                                                                                                              \
-    cudaPointerAttributes attributes;                                                                                                                   \
-    CUDA_ERROR_CHECK(cudaPointerGetAttributes(&attributes, pointer));                                                                                   \
-    if (attributes.devicePointer == NULL || device != attributes.device)                                                                                \
-    {                                                                                                                                                   \
-        if (attributes.devicePointer == NULL)                                                                                                           \
-        {                                                                                                                                               \
-            printf("CUDA error %d %s :: %s\n", __LINE__, __func__, "pointer is not resident on a GPU");                                                 \
-        }                                                                                                                                               \
-        else if (device != attributes.device)                                                                                                           \
-        {                                                                                                                                               \
-            printf("CUDA error %d %s :: pointer not resident on correct GPU (this: %d, pointer: %d)\n", __LINE__, __func__, device, attributes.device); \
-        }                                                                                                                                               \
-        exit(EXIT_FAILURE);                                                                                                                             \
-    }
-
 /*
     Computes the index for buffer values which are shared across GRID_DIM_Y
 */
