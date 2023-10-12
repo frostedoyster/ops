@@ -214,12 +214,14 @@ torch::Tensor calculate_neighbours_gpu(torch::Tensor sender_list, int64_t natoms
 
     size_t total_buff_size = 0;
 
-    total_buff_size += (NEIGHBOUR_NEDGES_PER_BLOCK + 1) * sizeof(int32_t);
+    total_buff_size += (NEIGHBOUR_NEDGES_PER_BLOCK + 1) * sizeof(int64_t);
 
+    int64_t num_senders = sender_list.size(0);
+    
     calculate_neighbours_kernel<<<block_dim, grid_dim, total_buff_size>>>(
-
-        sender_list.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
-        output_indices.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>());
+        sender_list.data_ptr<int64_t>(),
+        num_senders,
+        output_indices.data_ptr<int64_t>());
 
     cudaDeviceSynchronize();
 
