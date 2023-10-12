@@ -43,7 +43,7 @@ __global__ void forward_kernel(
 
     if (blockIdx.x == num_indices - 1) // nnodes -1
     {
-        edge_end = n_y - 1; // nedges -1
+        edge_end = n_y; // nedges -1
     }
     else
     {
@@ -70,13 +70,13 @@ __global__ void forward_kernel(
         for (int32_t i = edge_start; i < edge_end; i++)
         {
 
-            scalar_t y = Y[(i-1)*l_y + m]; // Y[i][m];
+            scalar_t y = Y[i*l_y + m]; // Y[i][m];
             scalar_t x = 0.0;
 
             if (valid)
             {
                 // x = X[i][feat_start + threadIdx.x];
-                x = X[(i-1)*l_x + feat_start + threadIdx.x];
+                x = X[i*l_x + feat_start + threadIdx.x];
             }
 
             tmp_output += x * y;
@@ -85,7 +85,7 @@ __global__ void forward_kernel(
         if (valid)
         {
             // output[node_index][m][feat_start + threadIdx.x] = tmp_output;
-            output[(node_index-1)*(l1_output*l2_output) + (m-1)*(l1_output) + feat_start + threadIdx.x] = tmp_output;
+            output[node_index*l1_output*l2_output + m*l1_output + feat_start + threadIdx.x] = tmp_output;
         }
     }
 }
