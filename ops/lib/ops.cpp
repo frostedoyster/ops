@@ -164,6 +164,19 @@ std::vector<torch::Tensor> backward_gpu(torch::Tensor X,
     int32_t nby = find_integer_divisor(Y.size(1), M_PER_BLOCK_X);
     dim3 block_dim_y(natoms, nby);
 
+    int64_t n_x = X.size(0);
+    int64_t l_x = X.size(1);
+    
+    int64_t n_y = Y.size(0);
+    int64_t l_y = Y.size(1);
+
+    int64_t num_receivers = receiver_list.size(0);
+    int64_t num_indices = neighbour_indices.size(0);
+
+    int64_t n_gradin = grad_in.size(0);
+    int64_t l1_gradin = grad_in.size(1);
+    int64_t l2_gradin = grad_in.size(2);
+
     AT_DISPATCH_FLOATING_TYPES(
         X.type(), "backward_gpu",
         ([&]
@@ -174,11 +187,18 @@ std::vector<torch::Tensor> backward_gpu(torch::Tensor X,
                 buff_size_x += Y.size(1) * FEATS_PER_BLOCK_Y * sizeof(scalar_t);
 
                 backward_dX_kernel<scalar_t><<<block_dim_x, grid_dim_x, buff_size_x>>>(
-                    Y.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-                    grad_in.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>(),
-                    receiver_list.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
-                    neighbour_indices.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
-                    gradX.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>());
+                    Y.data_ptr<scalar_t>(),
+                    n_y,
+                    l_y,
+                    grad_in.data_ptr<scalar_t>(),
+                    n_gradin,
+                    l1_gradin,
+                    l2_gradin,
+                    receiver_list.data_ptr<int64_t>(),
+                    num_receivers,
+                    neighbour_indices.data_ptr<int64_t>(),
+                    num_indices,
+                    gradX.data_ptr<scalar_t>());
             }
 
             if (Y.requires_grad())
@@ -187,12 +207,20 @@ std::vector<torch::Tensor> backward_gpu(torch::Tensor X,
                 buff_size_y += X.size(1) * M_PER_BLOCK_X * sizeof(scalar_t);
 
                 backward_dY_kernel<scalar_t><<<block_dim_y, grid_dim_y, buff_size_y>>>(
-                    X.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>(),
-                    grad_in.packed_accessor32<scalar_t, 3, torch::RestrictPtrTraits>(),
-                    receiver_list.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
-                    neighbour_indices.packed_accessor32<int32_t, 1, torch::RestrictPtrTraits>(),
-                    gradY.packed_accessor32<scalar_t, 2, torch::RestrictPtrTraits>());
-            } }));
+                    X.data_ptr<scalar_t>(),
+                    n_x,
+                    l_x,
+                    grad_in.data_ptr<scalar_t>(),
+                    n_gradin,
+                    l1_gradin,
+                    l2_gradin,
+                    receiver_list.data_ptr<int64_t>(),
+                    num_receivers,
+                    neighbour_indices.data_ptr<int64_t>(),
+                    num_indices,
+                    gradY.data_ptr<scalar_t>());
+            } 
+        }));
 
     cudaDeviceSynchronize();
 
@@ -217,7 +245,7 @@ torch::Tensor calculate_neighbours_gpu(torch::Tensor sender_list, int64_t natoms
     total_buff_size += (NEIGHBOUR_NEDGES_PER_BLOCK + 1) * sizeof(int64_t);
 
     int64_t num_senders = sender_list.size(0);
-    
+
     calculate_neighbours_kernel<<<block_dim, grid_dim, total_buff_size>>>(
         sender_list.data_ptr<int64_t>(),
         num_senders,
