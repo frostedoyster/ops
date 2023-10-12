@@ -27,7 +27,7 @@ def benchmark(dtype, device):
         indices.cpu(), nnodes)
 
     first_occurrences_cuda = ops.calculate_neighbours(
-        indices.int(), nnodes, 64)
+        indices.long(), nnodes, 64)
 
     print("first occurences consistent? ", torch.allclose(
         first_occurrences_cpu, first_occurrences_cuda.long().cpu()))

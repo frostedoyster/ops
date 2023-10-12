@@ -90,6 +90,38 @@ __global__ void forward_kernel(
     }
 }
 
+template __global__ void forward_kernel<float>(
+    const float* X,
+    const int64_t n_x,
+    const int64_t l_x,
+    const float* Y,
+    const int64_t n_y,
+    const int64_t l_y,
+    const int64_t* receiver_list,
+    const int64_t num_receivers,
+    const int64_t* neighbour_indices,
+    const int64_t num_indices,
+    float* output,
+    const int64_t n_output,
+    const int64_t l1_output,
+    const int64_t l2_output);
+
+template __global__ void forward_kernel<double>(
+    const double* X,
+    const int64_t n_x,
+    const int64_t l_x,
+    const double* Y,
+    const int64_t n_y,
+    const int64_t l_y,
+    const int64_t* receiver_list,
+    const int64_t num_receivers,
+    const int64_t* neighbour_indices,
+    const int64_t num_indices,
+    double* output,
+    const int64_t n_output,
+    const int64_t l1_output,
+    const int64_t l2_output);
+
 #define FEATS_PER_BLOCK_Y 32
 #define M_PER_BLOCK_X 4
 
@@ -107,7 +139,7 @@ __global__ void backward_dX_kernel(
     const int64_t num_receivers,
     const int64_t* neighbour_indices,
     const int64_t num_indices,
-    const scalar_t* grad_X)
+    scalar_t* grad_X)
 {
 
     extern __shared__ char buffer[];
@@ -209,6 +241,35 @@ __global__ void backward_dX_kernel(
     }
 }
 
+template __global__ void backward_dX_kernel<float>(
+    const float*,
+    const int64_t,
+    const int64_t,
+    const float*, // [nnodes, m, feat]
+    const int64_t,
+    const int64_t,
+    const int64_t,
+    const int64_t*,
+    const int64_t,
+    const int64_t*,
+    const int64_t,
+    float*);
+
+
+template __global__ void backward_dX_kernel<double>(
+    const double*,
+    const int64_t,
+    const int64_t,
+    const double*, // [nnodes, m, feat]
+    const int64_t,
+    const int64_t,
+    const int64_t,
+    const int64_t*,
+    const int64_t,
+    const int64_t*,
+    const int64_t,
+    double*);
+
 // ny = 4, nx = 32
 template <typename scalar_t>
 __global__ void backward_dY_kernel(
@@ -223,7 +284,7 @@ __global__ void backward_dY_kernel(
     const int64_t num_receivers,
     const int64_t* neighbour_indices,
     const int64_t num_indices,
-    const scalar_t* grad_Y)
+    scalar_t* grad_Y)
 {
 
     extern __shared__ char buffer[];
@@ -328,6 +389,35 @@ __global__ void backward_dY_kernel(
     }
 }
 
+template __global__ void backward_dY_kernel<float>(
+    const float*,
+    const int64_t,
+    const int64_t,
+    const float*, // [nnodes, m, feat]
+    const int64_t,
+    const int64_t,
+    const int64_t,
+    const int64_t*,
+    const int64_t,
+    const int64_t*,
+    const int64_t,
+    float*);
+
+
+template __global__ void backward_dY_kernel<double>(
+    const double*,
+    const int64_t,
+    const int64_t,
+    const double*, // [nnodes, m, feat]
+    const int64_t,
+    const int64_t,
+    const int64_t,
+    const int64_t*,
+    const int64_t,
+    const int64_t*,
+    const int64_t,
+    double*);
+
 #define NEIGHBOUR_NEDGES_PER_BLOCK 512
 
 /*
@@ -338,10 +428,11 @@ This is required by the CUDA code so we can send all calculations per-node to a 
 the function loads NEIGHBOUR_NEDGES_PER_BLOCK + 1 elements into shared memory, and then loops through the buffer twice. Once for even boundaries, once for odd boundaries.
 */
 
+template <typename integer_t>
 __global__ void calculate_neighbours_kernel(
-    const int64_t* sender_list,
+    const integer_t* sender_list,
     const int64_t num_senders,
-    int64_t* edge_indices)
+    integer_t* edge_indices)
 {
     extern __shared__ char buffer[];
     size_t offset = 0;
@@ -404,3 +495,13 @@ __global__ void calculate_neighbours_kernel(
         edge_indices[0] = 0;
     }
 }
+
+template __global__ void calculate_neighbours_kernel<int32_t>(
+    const int32_t*,
+    const int64_t,
+    int32_t*);
+
+template __global__ void calculate_neighbours_kernel<int64_t>(
+    const int64_t*,
+    const int64_t,
+    int64_t*);

@@ -70,7 +70,7 @@ def opt_ops(tensor_a, tensor_b, scatter_indices, out_dim):
 
     if tensor_a.is_cuda:
         result = torch.ops.ops_cu.ops(tensor_a, tensor_b, scatter_indices.to(
-            torch.int32), out_dim).swapaxes(1, 2)
+            torch.long), out_dim).swapaxes(1, 2)
     else:
         result = torch.ops.ops_cc.ops(
             tensor_a, tensor_b, scatter_indices, out_dim)

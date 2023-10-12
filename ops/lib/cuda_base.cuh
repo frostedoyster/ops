@@ -39,7 +39,7 @@ void backward_dX_kernel(
     const int64_t num_receivers,
     const int64_t* neighbour_indices,
     const int64_t num_indices,
-    const scalar_t* grad_X);
+    scalar_t* grad_X);
 
 template <typename scalar_t>
 __global__
@@ -55,12 +55,13 @@ void backward_dY_kernel(
     const int64_t num_receivers,
     const int64_t* neighbour_indices,
     const int64_t num_indices,
-    const scalar_t* grad_Y);
+    scalar_t* grad_Y);
 
+template <typename integer_t>
 __global__
 void calculate_neighbours_kernel(
-    const int64_t* sender_list,
+    const integer_t* sender_list,
     const int64_t num_senders,
-    int64_t* edge_indices);
+    integer_t* edge_indices);
 
 #endif //OPS_CUDA_BASE_CUH
