@@ -6,6 +6,8 @@
 
 #include "cuda_base.cuh"
 
+#define FULL_MASK 0xffffffff
+
 /*
     Computes the index for buffer values which are shared across GRID_DIM_Y
 */
@@ -18,17 +20,17 @@ __host__ __device__ int32_t find_integer_divisor(int32_t x, int32_t bdim)
 
 template <typename scalar_t>
 __global__ void forward_kernel(
-    const scalar_t* restrict X,
+    const scalar_t* X,
     const int64_t n_x,
     const int64_t l_x,
-    const scalar_t* restrict Y,
+    const scalar_t* Y,
     const int64_t n_y,
     const int64_t l_y,
-    const int64_t* restrict receiver_list,
+    const int64_t* receiver_list,
     const int64_t num_receivers,
-    const int64_t* restrict neighbour_indices,
+    const int64_t* neighbour_indices,
     const int64_t num_indices,
-    scalar_t* restrict output,
+    scalar_t* output,
     const int64_t n_output,
     const int64_t l1_output,
     const int64_t l2_output)
@@ -60,7 +62,7 @@ __global__ void forward_kernel(
     __syncthreads();
 
     // for (int32_t m = threadIdx.y; m < Y.size(1); m += blockDim.y)
-    for (int32_t m = threadIdx.y; m < l_y); m += blockDim.y)
+    for (int32_t m = threadIdx.y; m < l_y; m += blockDim.y)
     {
         scalar_t tmp_output = 0.0;
 
@@ -93,18 +95,18 @@ __global__ void forward_kernel(
 // nx = 4, ny = 32
 template <typename scalar_t>
 __global__ void backward_dX_kernel(
-    const scalar_t* restrict Y,
+    const scalar_t* Y,
     const int64_t n_y,
     const int64_t l_y,
-    const scalar_t* restrict grad_in, // [nnodes, m, feat]
+    const scalar_t* grad_in, // [nnodes, m, feat]
     const int64_t n_grad_in,
     const int64_t l1_grad_in,
     const int64_t l2_grad_in,
-    const int64_t* restrict receiver_list,
+    const int64_t* receiver_list,
     const int64_t num_receivers,
-    const int64_t* restrict neighbour_indices,
+    const int64_t* neighbour_indices,
     const int64_t num_indices,
-    const scalar_t* restrict grad_X)
+    const scalar_t* grad_X)
 {
 
     extern __shared__ char buffer[];
@@ -157,7 +159,7 @@ __global__ void backward_dX_kernel(
     }
 
     __syncthreads();
-    int niter_m = find_integer_divisor(Y.size(1), blockDim.x);             // 16 / 4
+    int niter_m = find_integer_divisor(l_y, blockDim.x);             // 16 / 4
     int niter_gradx = find_integer_divisor(FEATS_PER_BLOCK_Y, blockDim.y); // 32 / 32
 
     for (int32_t i = edge_start; i < edge_end; i++)
@@ -209,18 +211,18 @@ __global__ void backward_dX_kernel(
 // ny = 4, nx = 32
 template <typename scalar_t>
 __global__ void backward_dY_kernel(
-    const scalar_t* restrict X,
+    const scalar_t* X,
     const int64_t n_x,
     const int64_t l_x,
-    const scalar_t* restrict grad_in, // [nnodes, m, feat]
+    const scalar_t* grad_in, // [nnodes, m, feat]
     const int64_t n_grad_in,
     const int64_t l1_grad_in,
     const int64_t l2_grad_in,
-    const int64_t* restrict receiver_list,
+    const int64_t* receiver_list,
     const int64_t num_receivers,
-    const int64_t* restrict neighbour_indices,
+    const int64_t* neighbour_indices,
     const int64_t num_indices,
-    const scalar_t* restrict grad_Y)
+    const scalar_t* grad_Y)
 {
 
     extern __shared__ char buffer[];
@@ -233,7 +235,7 @@ __global__ void backward_dY_kernel(
 
     int32_t node_index = receiver_list[edge_start];
 
-    if (blockIdx.x == neighbour_indices.size(0) - 1) // nnodes -1
+    if (blockIdx.x == num_indices - 1) // nnodes -1
     {
         edge_end = n_x; // nedges -1
     }
@@ -259,7 +261,7 @@ __global__ void backward_dY_kernel(
         int local_m = m_idx * blockDim.y + threadIdx.y;
         int global_m = m_start + local_m;
 
-        for (int feat = threadIdx.x; feat < X.size(1); feat += blockDim.x)
+        for (int feat = threadIdx.x; feat < l_x; feat += blockDim.x)
         {
             scalar_t val = 0.0;
 
@@ -336,9 +338,9 @@ the function loads NEIGHBOUR_NEDGES_PER_BLOCK + 1 elements into shared memory, a
 */
 
 __global__ void calculate_neighbours_kernel(
-    const int64_t* restrict sender_list,
+    const int64_t* sender_list,
     const int64_t num_senders,
-    int64_t* restrict edge_indices)
+    int64_t* edge_indices)
 {
     extern __shared__ char buffer[];
     size_t offset = 0;
@@ -401,3 +403,93 @@ __global__ void calculate_neighbours_kernel(
         edge_indices[0] = 0;
     }
 }
+
+// template instantiations
+
+template void forward_kernel<float>(
+    float*,
+    int64_t,
+    int64_t,
+    float*,
+    int64_t,
+    int64_t,
+    int64_t*,
+    int64_t,
+    int64_t*,
+    int64_t,
+    float*,
+    int64_t,
+    int64_t,
+    int64_t);
+
+template void forward_kernel<double>(
+    double*,
+    int64_t,
+    int64_t,
+    double*,
+    int64_t,
+    int64_t,
+    int64_t*,
+    int64_t,
+    int64_t*,
+    int64_t,
+    double*,
+    int64_t,
+    int64_t,
+    int64_t);
+
+template void backward_dX_kernel<float>(
+    float*,
+    int64_t,
+    int64_t,
+    float*,
+    int64_t,
+    int64_t,
+    int64_t,
+    int64_t*,
+    int64_t,
+    int64_t*,
+    int64_t,
+    float*);
+
+template void backward_dX_kernel<double>(
+    double*,
+    int64_t,
+    int64_t,
+    double*,
+    int64_t,
+    int64_t,
+    int64_t,
+    int64_t*,
+    int64_t,
+    int64_t*,
+    int64_t,
+    double*);
+
+template void backward_dY_kernel<float>(
+    float*,
+    int64_t,
+    int64_t,
+    float*,
+    int64_t,
+    int64_t,
+    int64_t,
+    int64_t*,
+    int64_t,
+    int64_t*,
+    int64_t,
+    float*);
+
+template void backward_dY_kernel<double>(
+    double*,
+    int64_t,
+    int64_t,
+    double*,
+    int64_t,
+    int64_t,
+    int64_t,
+    int64_t*,
+    int64_t,
+    int64_t*,
+    int64_t,
+    double*);
