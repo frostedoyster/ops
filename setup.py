@@ -45,7 +45,7 @@ ext_modules = [ext_module_cpp]
 if cuda.is_available():
     ext_module_cuda = CUDAExtension(
         "ops.lib.ops_cuda",
-        ["ops/lib/cuda_base.cu", "ops/lib/ops.cpp"],
+        ["ops/lib/cuda_base.cu", "ops/lib/ops.cu"],
         extra_compile_args={'nvcc': []}
     )
     ext_modules.append(ext_module_cuda)

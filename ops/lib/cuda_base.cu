@@ -13,7 +13,8 @@
 */
 __device__ int get_index(int i) { return i * blockDim.y + threadIdx.y; }
 
-__host__ __device__ int32_t find_integer_divisor(int32_t x, int32_t bdim)
+__host__ __device__
+int32_t find_integer_divisor(int32_t x, int32_t bdim)
 {
     return (x + bdim - 1) / bdim;
 }
@@ -403,93 +404,3 @@ __global__ void calculate_neighbours_kernel(
         edge_indices[0] = 0;
     }
 }
-
-// template instantiations
-
-template void forward_kernel<float>(
-    float*,
-    int64_t,
-    int64_t,
-    float*,
-    int64_t,
-    int64_t,
-    int64_t*,
-    int64_t,
-    int64_t*,
-    int64_t,
-    float*,
-    int64_t,
-    int64_t,
-    int64_t);
-
-template void forward_kernel<double>(
-    double*,
-    int64_t,
-    int64_t,
-    double*,
-    int64_t,
-    int64_t,
-    int64_t*,
-    int64_t,
-    int64_t*,
-    int64_t,
-    double*,
-    int64_t,
-    int64_t,
-    int64_t);
-
-template void backward_dX_kernel<float>(
-    float*,
-    int64_t,
-    int64_t,
-    float*,
-    int64_t,
-    int64_t,
-    int64_t,
-    int64_t*,
-    int64_t,
-    int64_t*,
-    int64_t,
-    float*);
-
-template void backward_dX_kernel<double>(
-    double*,
-    int64_t,
-    int64_t,
-    double*,
-    int64_t,
-    int64_t,
-    int64_t,
-    int64_t*,
-    int64_t,
-    int64_t*,
-    int64_t,
-    double*);
-
-template void backward_dY_kernel<float>(
-    float*,
-    int64_t,
-    int64_t,
-    float*,
-    int64_t,
-    int64_t,
-    int64_t,
-    int64_t*,
-    int64_t,
-    int64_t*,
-    int64_t,
-    float*);
-
-template void backward_dY_kernel<double>(
-    double*,
-    int64_t,
-    int64_t,
-    double*,
-    int64_t,
-    int64_t,
-    int64_t,
-    int64_t*,
-    int64_t,
-    int64_t*,
-    int64_t,
-    double*);

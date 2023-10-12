@@ -1,6 +1,9 @@
 #include <torch/script.h>
 #include <iostream>
 
+#include <cuda.h>
+#include <cuda_runtime.h>
+
 #include "cuda_base.cuh"
 
 using namespace std;
@@ -45,10 +48,10 @@ using namespace torch::autograd;
         exit(EXIT_FAILURE);                                                                                                                             \
     }
 
-int32_t find_integer_divisor(int32_t x, int32_t bdim)
-{
-    return (x + bdim - 1) / bdim;
-}
+#define FEATS_PER_BLOCK_Y 32
+#define M_PER_BLOCK_X 4
+
+#define NEIGHBOUR_NEDGES_PER_BLOCK 512
 
 torch::Tensor forward_gpu(torch::Tensor X,
                           torch::Tensor Y,
@@ -94,7 +97,7 @@ torch::Tensor forward_gpu(torch::Tensor X,
                     int64_t num_receivers = receiver_list.size(0);
                     int64_t num_indices = neighbour_indices.size(0);
 
-                    int64_t n_output = n_atoms;
+                    int64_t n_output = natoms;
                     int64_t l1_output = l_y;
                     int64_t l2_output = l_x;
 

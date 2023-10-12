@@ -4,6 +4,9 @@
 #include <vector>
 #include <cmath>
 
+__host__ __device__
+int32_t find_integer_divisor(int32_t x, int32_t bdim);
+
 template <typename scalar_t>
 __global__
 void forward_kernel(
