@@ -21,7 +21,7 @@ def benchmark(dtype, device):
                    device=device, requires_grad=True)
     indices = torch.sort(torch.randint(nnodes, (nedges,), device=device))[0]
 
-    indices_cuda = indices.cuda().int()
+    indices_cuda = indices.cuda().long()
 
     start = time.time()
     for _ in range(1000):
@@ -36,7 +36,7 @@ def benchmark(dtype, device):
     # warmup
     for _ in range(1000):
         output_cuda = ops.forward_test(X, Y, indices_cuda, neighbour_cuda, nnodes,  32, 4, 1)
-
+    
     start = time.time()
     for _ in range(1000):
         output_cuda = ops.forward_test(X, Y, indices_cuda, neighbour_cuda, nnodes,  32, 4, 1)

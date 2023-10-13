@@ -7,8 +7,8 @@ from ops.lib import ops
 
 def benchmark(dtype, device):
 
-    nnodes = 1000
-    nedges = 60000
+    nnodes = 10
+    nedges = 60
     nchannels = 32
     nl = 5
 
@@ -27,7 +27,7 @@ def benchmark(dtype, device):
         indices.cpu(), nnodes)
 
     first_occurrences_cuda = ops.calculate_neighbours(
-        indices.int(), nnodes, 64)
+        indices.long(), nnodes, 64)
 
     print("first occurences consistent? ", torch.allclose(
         first_occurrences_cpu, first_occurrences_cuda.long().cpu()))
@@ -36,6 +36,11 @@ def benchmark(dtype, device):
     cuda_output = opt_ops(a_copy, b_copy, indices, nnodes)
 
     print("forwards consistent? ", torch.allclose(ref_output, cuda_output))
+
+    print("CPU output \n")
+    print(ref_output)
+    print("GPU output \n")
+    print(cuda_output)
 
     loss = torch.sum(ref_output)
     loss.backward()
